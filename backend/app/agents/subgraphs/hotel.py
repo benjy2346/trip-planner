@@ -1,10 +1,14 @@
-import json
+from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.agents.state import HotelSubState
 from app.services.amap_tools import get_amap_tools
-from app.agents.llm_router import acall_with_fallback
+from app.agents.llm_router import get_structured_chain
 from app.models.schemas import Hotel
+
+
+class _HotelOutput(BaseModel):
+    hotel_result: list[Hotel]
 
 
 async def fetch_hotels(state: HotelSubState) -> dict:
@@ -21,21 +25,17 @@ async def fetch_hotels(state: HotelSubState) -> dict:
 async def parse_hotels(state: HotelSubState) -> dict:
     prompt = [
         SystemMessage(content=(
-            "从高德 POI 搜索结果中提取酒店信息，返回 JSON 数组（最多 3 家）。\n"
-            '每项格式：{"name":"...","address":"...","price_range":"...","rating":"...","distance":"...","type":"...","estimated_cost":0}\n'
-            "只返回 JSON 数组。"
+            "从高德 POI 搜索结果中提取酒店信息（最多 3 家），"
+            "按 hotel_result 字段返回列表，每项包含 name、address、"
+            "price_range、rating、distance、type、estimated_cost。"
         )),
         HumanMessage(content=(
             f"搜索结果：{state['raw_result']}\n"
             f"偏好：{state['accommodation_pref']}，城市：{state['city']}"
         )),
     ]
-    response = await acall_with_fallback(prompt)
-    try:
-        data = json.loads(response.content)
-        return {"hotel_result": [Hotel(**item) for item in data]}
-    except Exception:
-        return {"hotel_result": []}
+    result = await get_structured_chain(_HotelOutput).ainvoke(prompt)
+    return {"hotel_result": result.hotel_result}
 
 
 def create_hotel_subgraph():

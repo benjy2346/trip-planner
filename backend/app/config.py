@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # LangSmith 可观测性
+    langchain_tracing_v2: str = "false"
+    langchain_api_key: str = ""
+    langchain_project: str = "trip-planner"
+
     # 日志配置
     log_level: str = "INFO"
 

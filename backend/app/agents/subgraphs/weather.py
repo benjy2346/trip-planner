@@ -1,10 +1,14 @@
-import json
+from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.agents.state import WeatherSubState
 from app.services.amap_tools import get_amap_tools
-from app.agents.llm_router import acall_with_fallback
+from app.agents.llm_router import get_structured_chain
 from app.models.schemas import WeatherInfo
+
+
+class _WeatherOutput(BaseModel):
+    weather_result: list[WeatherInfo]
 
 
 async def fetch_weather(state: WeatherSubState) -> dict:
@@ -18,22 +22,17 @@ async def fetch_weather(state: WeatherSubState) -> dict:
 async def parse_weather(state: WeatherSubState) -> dict:
     prompt = [
         SystemMessage(content=(
-            "从高德天气查询结果中提取天气数据，返回 JSON 数组。\n"
-            '每项格式：{"date":"YYYY-MM-DD","day_weather":"晴","night_weather":"多云",'
-            '"day_temp":28,"night_temp":18,"wind_direction":"南","wind_power":"3级"}\n'
-            "只返回 JSON 数组，不要其他文字。"
+            "从高德天气查询结果中提取天气数据，"
+            "按 weather_result 字段返回列表，每项包含 date、day_weather、"
+            "night_weather、day_temp、night_temp、wind_direction、wind_power。"
         )),
         HumanMessage(content=(
             f"查询结果：{state['raw_result']}\n"
             f"目标日期：{state['travel_dates']}"
         )),
     ]
-    response = await acall_with_fallback(prompt)
-    try:
-        data = json.loads(response.content)
-        return {"weather_result": [WeatherInfo(**item) for item in data]}
-    except Exception:
-        return {"weather_result": []}
+    result = await get_structured_chain(_WeatherOutput).ainvoke(prompt)
+    return {"weather_result": result.weather_result}
 
 
 def create_weather_subgraph():

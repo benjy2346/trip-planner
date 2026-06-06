@@ -1,4 +1,3 @@
-import json
 from datetime import date, timedelta
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
@@ -7,7 +6,7 @@ from app.agents.state import SupervisorState, WeatherSubState, HotelSubState, PO
 from app.agents.subgraphs.weather import weather_subgraph
 from app.agents.subgraphs.hotel import hotel_subgraph
 from app.agents.subgraphs.poi import poi_subgraph
-from app.agents.llm_router import acall_with_fallback
+from app.agents.llm_router import get_structured_chain
 from app.models.schemas import TripPlan
 
 
@@ -62,9 +61,7 @@ async def assembler_node(state: SupervisorState) -> dict:
     req = state["trip_request"]
     prompt = [
         SystemMessage(content=(
-            "你是旅行规划助手。根据提供的天气、酒店、景点数据生成详细行程，返回 JSON。\n"
-            '格式：{"city":"...","start_date":"...","end_date":"...","days":[...],"overall_suggestions":"..."}\n'
-            "只返回 JSON，不要其他文字。"
+            "你是旅行规划助手。根据提供的天气、酒店、景点数据生成完整行程计划。"
         )),
         HumanMessage(content=(
             f"城市：{req.city}，{req.start_date}~{req.end_date}，{req.travel_days}天\n"
@@ -76,18 +73,7 @@ async def assembler_node(state: SupervisorState) -> dict:
             f"景点：{[p.model_dump() for p in state.get('poi_outputs', [])]}"
         )),
     ]
-    response = await acall_with_fallback(prompt)
-    try:
-        data = json.loads(response.content)
-        trip_plan = TripPlan(**data)
-    except Exception:
-        trip_plan = TripPlan(
-            city=req.city,
-            start_date=req.start_date,
-            end_date=req.end_date,
-            days=[],
-            overall_suggestions="行程生成失败，请重试",
-        )
+    trip_plan = await get_structured_chain(TripPlan).ainvoke(prompt)
     return {
         "trip_plan": trip_plan,
         "messages": [AIMessage(content=f"已为您生成{req.city}{req.travel_days}天行程。")],

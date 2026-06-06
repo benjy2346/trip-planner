@@ -1,10 +1,14 @@
-import json
+from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.agents.state import POISubState
 from app.services.amap_tools import get_amap_tools
-from app.agents.llm_router import acall_with_fallback
-from app.models.schemas import Attraction, Location
+from app.agents.llm_router import get_structured_chain
+from app.models.schemas import Attraction
+
+
+class _POIOutput(BaseModel):
+    poi_result: list[Attraction]
 
 
 async def fetch_pois(state: POISubState) -> dict:
@@ -19,27 +23,17 @@ async def fetch_pois(state: POISubState) -> dict:
 async def parse_pois(state: POISubState) -> dict:
     prompt = [
         SystemMessage(content=(
-            "从高德 POI 搜索结果中提取景点信息，返回 JSON 数组。\n"
-            '每项格式：{"name":"...","address":"...","location":{"longitude":0.0,"latitude":0.0},'
-            '"visit_duration":120,"description":"...","category":"...","rating":4.5,"ticket_price":0}\n'
-            "只返回 JSON 数组。"
+            "从高德 POI 搜索结果中提取景点信息，"
+            "按 poi_result 字段返回列表，每项包含 name、address、location（longitude/latitude）、"
+            "visit_duration、description、category、rating、ticket_price。"
         )),
         HumanMessage(content=(
             f"搜索结果：{state['raw_result']}\n"
             f"偏好：{state['preferences']}，天数：{state['travel_days']}，城市：{state['city']}"
         )),
     ]
-    response = await acall_with_fallback(prompt)
-    try:
-        data = json.loads(response.content)
-        attractions = []
-        for item in data:
-            if "location" not in item:
-                item["location"] = {"longitude": 0.0, "latitude": 0.0}
-            attractions.append(Attraction(**item))
-        return {"poi_result": attractions}
-    except Exception:
-        return {"poi_result": []}
+    result = await get_structured_chain(_POIOutput).ainvoke(prompt)
+    return {"poi_result": result.poi_result}
 
 
 def create_poi_subgraph():

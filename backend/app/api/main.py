@@ -34,12 +34,25 @@ app.include_router(map_routes.router, prefix="/api")
 app.include_router(chat_routes.router, prefix="/api")
 
 
+def _setup_langsmith():
+    import os
+    s = get_settings()
+    if s.langchain_tracing_v2 == "true" and s.langchain_api_key:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = s.langchain_api_key
+        os.environ["LANGCHAIN_PROJECT"] = s.langchain_project
+        print(f"✅ LangSmith 追踪已启用，项目：{s.langchain_project}")
+    else:
+        print("ℹ️  LangSmith 追踪未启用")
+
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动事件"""
     print("\n" + "="*60)
     print(f"🚀 {settings.app_name} v{settings.app_version}")
     print("="*60)
+    _setup_langsmith()
     print_config()
     try:
         validate_config()

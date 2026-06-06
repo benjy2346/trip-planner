@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.models.schemas import TripRequest, WeatherInfo, Hotel, Attraction, Location
+from app.models.schemas import TripRequest, TripPlan, WeatherInfo, Hotel, Attraction, Location
 
 
 def _make_request():
@@ -37,10 +37,15 @@ async def test_supervisor_returns_trip_plan():
 
     plan_json = '{"city":"北京","start_date":"2025-06-01","end_date":"2025-06-03","days":[],"overall_suggestions":"推荐早起"}'
 
+    mock_plan = TripPlan(city="北京", start_date="2025-06-01", end_date="2025-06-03",
+                         days=[], overall_suggestions="推荐早起")
+    mock_chain = MagicMock()
+    mock_chain.ainvoke = AsyncMock(return_value=mock_plan)
+
     with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
          patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
          patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.acall_with_fallback", new_callable=AsyncMock, return_value=MagicMock(content=plan_json)):
+         patch("app.agents.supervisor.get_structured_chain", return_value=mock_chain):
 
         mock_w.ainvoke = AsyncMock(return_value={"weather_result": weather_out})
         mock_h.ainvoke = AsyncMock(return_value={"hotel_result": hotel_out})
@@ -55,12 +60,15 @@ async def test_supervisor_returns_trip_plan():
 
 @pytest.mark.asyncio
 async def test_all_three_subgraphs_invoked():
-    plan_json = '{"city":"北京","start_date":"2025-06-01","end_date":"2025-06-03","days":[],"overall_suggestions":"ok"}'
+    mock_plan = TripPlan(city="北京", start_date="2025-06-01", end_date="2025-06-03",
+                         days=[], overall_suggestions="ok")
+    mock_chain = MagicMock()
+    mock_chain.ainvoke = AsyncMock(return_value=mock_plan)
 
     with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
          patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
          patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.acall_with_fallback", new_callable=AsyncMock, return_value=MagicMock(content=plan_json)):
+         patch("app.agents.supervisor.get_structured_chain", return_value=mock_chain):
 
         mock_w.ainvoke = AsyncMock(return_value={"weather_result": []})
         mock_h.ainvoke = AsyncMock(return_value={"hotel_result": []})

@@ -10,28 +10,28 @@ _llm_chain: Runnable | None = None
 _primary_llm: ChatOpenAI | None = None
 
 
-def _build_chain() -> tuple[Runnable, ChatOpenAI]:
+def _make_llm(base_url: str, api_key: str, model: str) -> ChatOpenAI:
+    return ChatOpenAI(
+        base_url=base_url,
+        api_key=api_key or "placeholder",
+        model=model,
+        timeout=8,
+    )
+
+
+def _get_providers() -> tuple[ChatOpenAI, ChatOpenAI, ChatOpenAI]:
     s = get_settings()
-    primary = ChatOpenAI(
-        base_url=s.deepseek_base_url,
-        api_key=s.deepseek_api_key or "placeholder",
-        model=s.deepseek_model,
-        timeout=8,
+    return (
+        _make_llm(s.deepseek_base_url, s.deepseek_api_key, s.deepseek_model),
+        _make_llm(s.gemini_base_url, s.gemini_api_key, s.gemini_model),
+        _make_llm(s.openai_base_url, s.openai_api_key, s.openai_model),
     )
-    gemini = ChatOpenAI(
-        base_url=s.gemini_base_url,
-        api_key=s.gemini_api_key,
-        model=s.gemini_model,
-        timeout=8,
-    )
-    openai = ChatOpenAI(
-        base_url=s.openai_base_url,
-        api_key=s.openai_api_key or "placeholder",
-        model=s.openai_model,
-        timeout=8,
-    )
+
+
+def _build_chain() -> tuple[Runnable, ChatOpenAI]:
+    primary, gemini, openai_llm = _get_providers()
     chain = primary.with_fallbacks(
-        [gemini, openai],
+        [gemini, openai_llm],
         exceptions_to_handle=_FALLBACK_ERRORS,
     )
     return chain, primary
@@ -50,6 +50,18 @@ def get_primary_llm() -> ChatOpenAI:
     if _primary_llm is None:
         _llm_chain, _primary_llm = _build_chain()
     return _primary_llm
+
+
+def get_structured_chain(schema: type) -> Runnable:
+    """每个供应商独立绑定 schema，降级链整体保留 structured output 能力。"""
+    primary, gemini, openai_llm = _get_providers()
+    return primary.with_structured_output(schema).with_fallbacks(
+        [
+            gemini.with_structured_output(schema),
+            openai_llm.with_structured_output(schema),
+        ],
+        exceptions_to_handle=_FALLBACK_ERRORS,
+    )
 
 
 def call_with_fallback(messages: list[BaseMessage]):
