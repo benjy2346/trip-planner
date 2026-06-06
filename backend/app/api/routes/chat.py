@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from app.agents.llm_router import acall_with_fallback, _build_providers
+from app.agents.llm_router import acall_with_fallback, get_primary_llm
 from app.agents.state_trimmer import trim_state
 from app.services.session_store import load_session, save_session
 from app.models.schemas import TripPlan
@@ -28,8 +28,7 @@ async def modify_trip(request: ChatModifyRequest):
     if state is None:
         raise HTTPException(status_code=404, detail="会话不存在，请先生成行程")
 
-    llm = _build_providers()[0]
-    state = trim_state(state, llm)
+    state = trim_state(state, get_primary_llm())
 
     summary_ctx = f"历史摘要：{state['summary']}\n" if state.get("summary") else ""
     current_plan = state["trip_plan"].model_dump_json() if state.get("trip_plan") else "无"
