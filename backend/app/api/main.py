@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from ..config import get_settings, validate_config, print_config
 from ..services.amap_tools import init_amap_tools, close_amap_tools
-from .routes import trip, poi, map as map_routes
+from .routes import trip, poi, map as map_routes, chat as chat_routes
 
 # 获取配置
 settings = get_settings()
@@ -31,6 +31,7 @@ app.add_middleware(
 app.include_router(trip.router, prefix="/api")
 app.include_router(poi.router, prefix="/api")
 app.include_router(map_routes.router, prefix="/api")
+app.include_router(chat_routes.router, prefix="/api")
 
 
 @app.on_event("startup")
