@@ -35,7 +35,14 @@
       </a-space>
     </div>
 
-    <div v-if="tripPlan" class="content-wrapper">
+    <div v-if="tripPlan" class="content-wrapper" style="display:flex">
+      <!-- 右侧 Chat 面板 -->
+      <div class="chat-sidebar">
+        <TripModifyChat
+          :user-id="userId"
+          @plan-updated="onPlanUpdated"
+        />
+      </div>
       <!-- 侧边导航 -->
       <div class="side-nav">
         <a-affix :offset-top="80">
@@ -320,6 +327,16 @@ import AMapLoader from '@amap/amap-jsapi-loader'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import type { TripPlan } from '@/types'
+import TripModifyChat from '@/components/TripModifyChat.vue'
+
+const userId = (() => {
+  let id = localStorage.getItem('trip_user_id')
+  if (!id) {
+    id = crypto.randomUUID()
+    localStorage.setItem('trip_user_id', id)
+  }
+  return id
+})()
 
 const router = useRouter()
 const tripPlan = ref<TripPlan | null>(null)
@@ -353,6 +370,11 @@ watch(activeDays, async (keys) => {
 
 const goBack = () => {
   router.push('/')
+}
+
+const onPlanUpdated = (newPlan: TripPlan) => {
+  tripPlan.value = newPlan
+  sessionStorage.setItem('tripPlan', JSON.stringify(newPlan))
 }
 
 // 滚动到指定区域
@@ -1498,6 +1520,15 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
     flex-direction: column;
     gap: 16px;
   }
+}
+
+.chat-sidebar {
+  width: 360px;
+  flex-shrink: 0;
+  height: calc(100vh - 112px);
+  position: sticky;
+  top: 64px;
+  order: 999;
 }
 </style>
 
