@@ -61,8 +61,10 @@ async def startup_event():
         print(f"\n❌ 配置验证失败:\n{e}")
         raise
     await init_amap_tools()
-    from ..services.session_store import init_redis
-    await init_redis()
+    from ..services.checkpointer import init_checkpointer
+    from ..agents import init_supervisor_graph
+    checkpointer = await init_checkpointer()
+    init_supervisor_graph(checkpointer)
     print("\n" + "="*60)
     print("📚 API文档: http://localhost:8000/docs")
     print("="*60 + "\n")
@@ -71,8 +73,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     await close_amap_tools()
-    from ..services.session_store import close_redis
-    await close_redis()
+    from ..services.checkpointer import close_checkpointer
+    await close_checkpointer()
     print("\n👋 应用已关闭")
 
 

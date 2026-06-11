@@ -1,10 +1,10 @@
 """旅行规划API路由"""
 
 from fastapi import APIRouter, HTTPException
+from langchain_core.messages import RemoveMessage
 from app.models.schemas import TripRequest, TripPlanResponse
-from app.agents import supervisor_graph
+from app.agents import get_supervisor_graph
 from app.agents.state import SupervisorState
-from app.services.session_store import save_session
 
 router = APIRouter(prefix="/trip", tags=["旅行规划"])
 
@@ -16,6 +16,17 @@ async def plan_trip(request: TripRequest):
         print(f"📥 收到旅行规划请求: {request.city} {request.travel_days}天 [用户:{request.user_id[:8]}]")
         print(f"{'='*60}\n")
 
+        graph = get_supervisor_graph()
+        config = {"configurable": {"thread_id": request.user_id}}
+
+        # 重新规划时清空历史 messages，避免跨 session 累积
+        snapshot = await graph.aget_state(config)
+        if snapshot and snapshot.values.get("messages"):
+            await graph.aupdate_state(
+                config,
+                {"messages": [RemoveMessage(id=m.id) for m in snapshot.values["messages"]]},
+            )
+
         initial_state = SupervisorState(
             trip_request=request,
             messages=[],
@@ -25,8 +36,7 @@ async def plan_trip(request: TripRequest):
             hotel_outputs=[],
             poi_outputs=[],
         )
-        result = await supervisor_graph.ainvoke(initial_state)
-        await save_session(request.user_id, result)
+        result = await graph.ainvoke(initial_state, config=config)
 
         print("✅ 旅行计划生成成功\n")
         return TripPlanResponse(success=True, message="旅行计划生成成功", data=result["trip_plan"])

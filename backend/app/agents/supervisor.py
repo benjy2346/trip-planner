@@ -157,7 +157,7 @@ async def assembler_node(state: SupervisorState) -> dict:
     }
 
 
-def create_supervisor_graph():
+def create_supervisor_graph(checkpointer=None):
     builder = StateGraph(SupervisorState)
     builder.add_node("run_weather", run_weather_node)
     builder.add_node("run_hotel", run_hotel_node)
@@ -168,7 +168,4 @@ def create_supervisor_graph():
     builder.add_edge("run_hotel", "assembler")
     builder.add_edge("run_poi", "assembler")
     builder.add_edge("assembler", END)
-    return builder.compile()
-
-
-supervisor_graph = create_supervisor_graph()
+    return builder.compile(checkpointer=checkpointer)
