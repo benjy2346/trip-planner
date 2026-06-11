@@ -6,7 +6,8 @@ from app.agents.state import SupervisorState, WeatherSubState, HotelSubState, PO
 from app.agents.subgraphs.weather import weather_subgraph
 from app.agents.subgraphs.hotel import hotel_subgraph
 from app.agents.subgraphs.poi import poi_subgraph
-from app.agents.llm_router import get_structured_chain
+import json
+from app.agents.llm_router import acall_with_fallback
 from app.models.schemas import TripPlan
 
 
@@ -59,21 +60,97 @@ async def run_poi_node(sub_state: POISubState) -> dict:
 
 async def assembler_node(state: SupervisorState) -> dict:
     req = state["trip_request"]
+    PLANNER_SYSTEM_PROMPT = """你是行程规划专家。你的任务是根据景点信息和天气信息,生成详细的旅行计划。
+
+请严格按照以下JSON格式返回旅行计划:
+```json
+{
+  "city": "城市名称",
+  "start_date": "YYYY-MM-DD",
+  "end_date": "YYYY-MM-DD",
+  "days": [
+    {
+      "date": "YYYY-MM-DD",
+      "day_index": 0,
+      "description": "第1天行程概述",
+      "transportation": "交通方式",
+      "accommodation": "住宿类型",
+      "hotel": {
+        "name": "酒店名称",
+        "address": "酒店地址",
+        "location": {"longitude": 116.397128, "latitude": 39.916527},
+        "price_range": "300-500元",
+        "rating": "4.5",
+        "distance": "距离景点2公里",
+        "type": "经济型酒店",
+        "estimated_cost": 400
+      },
+      "attractions": [
+        {
+          "name": "景点名称",
+          "address": "详细地址",
+          "location": {"longitude": 116.397128, "latitude": 39.916527},
+          "visit_duration": 120,
+          "description": "景点详细描述",
+          "category": "景点类别",
+          "ticket_price": 60
+        }
+      ],
+      "meals": [
+        {"type": "breakfast", "name": "早餐推荐", "description": "早餐描述", "estimated_cost": 30},
+        {"type": "lunch", "name": "午餐推荐", "description": "午餐描述", "estimated_cost": 50},
+        {"type": "dinner", "name": "晚餐推荐", "description": "晚餐描述", "estimated_cost": 80}
+      ]
+    }
+  ],
+  "weather_info": [
+    {
+      "date": "YYYY-MM-DD",
+      "day_weather": "晴",
+      "night_weather": "多云",
+      "day_temp": 25,
+      "night_temp": 15,
+      "wind_direction": "南风",
+      "wind_power": "1-3级"
+    }
+  ],
+  "overall_suggestions": "总体建议",
+  "budget": {
+    "total_attractions": 180,
+    "total_hotels": 1200,
+    "total_meals": 480,
+    "total_transportation": 200,
+    "total": 2060
+  }
+}
+```
+
+**重要提示:**
+1. weather_info数组必须包含每一天的天气信息
+2. 温度必须是纯数字(不要带°C等单位)
+3. 每天安排2-3个景点
+4. 考虑景点之间的距离和游览时间
+5. 每天必须包含早中晚三餐
+6. 提供实用的旅行建议
+7. **必须包含预算信息**
+8. 只返回JSON，不要其他文字，不要markdown代码块"""
+
     prompt = [
-        SystemMessage(content=(
-            "你是旅行规划助手。根据提供的天气、酒店、景点数据生成完整行程计划。"
-        )),
+        SystemMessage(content=PLANNER_SYSTEM_PROMPT),
         HumanMessage(content=(
             f"城市：{req.city}，{req.start_date}~{req.end_date}，{req.travel_days}天\n"
             f"交通：{req.transportation}，住宿：{req.accommodation}\n"
             f"偏好：{req.preferences}\n"
             f"{f'额外要求：{req.free_text_input}' if req.free_text_input else ''}\n\n"
-            f"天气：{[w.model_dump() for w in state.get('weather_outputs', [])]}\n"
-            f"酒店：{[h.model_dump() for h in state.get('hotel_outputs', [])]}\n"
-            f"景点：{[p.model_dump() for p in state.get('poi_outputs', [])]}"
+            f"天气数据：{[w.model_dump() for w in state.get('weather_outputs', [])]}\n"
+            f"推荐酒店：{[h.model_dump() for h in state.get('hotel_outputs', [])]}\n"
+            f"推荐景点：{[p.model_dump() for p in state.get('poi_outputs', [])]}"
         )),
     ]
-    trip_plan = await get_structured_chain(TripPlan).ainvoke(prompt)
+    response = await acall_with_fallback(prompt)
+    content = response.content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    data = json.loads(content)
+    trip_plan = TripPlan(**data)
     return {
         "trip_plan": trip_plan,
         "messages": [AIMessage(content=f"已为您生成{req.city}{req.travel_days}天行程。")],

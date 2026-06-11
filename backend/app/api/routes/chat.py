@@ -22,6 +22,18 @@ class ChatModifyResponse(BaseModel):
     updated_plan: TripPlan | None = None
 
 
+@router.get("/history/{user_id}", summary="获取对话历史")
+async def get_history(user_id: str):
+    state = await load_session(user_id)
+    if state is None:
+        return {"messages": []}
+    msgs = [
+        {"role": "user" if m.type == "human" else "ai", "content": m.content}
+        for m in state.get("messages", [])
+    ]
+    return {"messages": msgs}
+
+
 @router.post("/modify", response_model=ChatModifyResponse, summary="多轮修改行程")
 async def modify_trip(request: ChatModifyRequest):
     state = await load_session(request.user_id)

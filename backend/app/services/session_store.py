@@ -1,18 +1,18 @@
 import json
 from typing import Optional
-import redis.asyncio as aioredis
+import redis.asyncio as redis
 from app.config import get_settings
 from app.agents.state import SupervisorState
 from app.models.schemas import TripRequest, TripPlan
 
 SESSION_TTL = 86400  # 滑动 TTL 24h
-_redis_client: aioredis.Redis | None = None
+_redis_client: redis.Redis | None = None
 
 
-def _get_redis() -> aioredis.Redis:
+def _get_redis() -> redis.Redis:
     global _redis_client
     if _redis_client is None:
-        _redis_client = aioredis.from_url(get_settings().redis_url, decode_responses=True)
+        _redis_client = redis.from_url(get_settings().redis_url, decode_responses=True)
     return _redis_client
 
 

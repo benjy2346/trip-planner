@@ -20,16 +20,13 @@ async def init_amap_tools() -> None:
             "transport": "stdio",
         }
     })
-    await _client.__aenter__()
-    _tools = _client.get_tools()
+    _tools = await _client.get_tools()
     print(f"✅ Amap MCP 工具初始化成功，共 {len(_tools)} 个工具")
 
 
 async def close_amap_tools() -> None:
     global _client
-    if _client:
-        await _client.__aexit__(None, None, None)
-        _client = None
+    _client = None
 
 
 def get_amap_tools() -> list[BaseTool]:

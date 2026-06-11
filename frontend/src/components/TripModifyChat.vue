@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import axios from 'axios'
 
 const props = defineProps<{ userId: string }>()
@@ -42,6 +42,12 @@ const messages = ref<Message[]>([])
 const inputText = ref('')
 const loading = ref(false)
 const messageContainer = ref<HTMLElement | null>(null)
+
+onMounted(async () => {
+  const { data } = await axios.get(`/api/chat/history/${props.userId}`)
+  messages.value = data.messages ?? []
+  await scrollToBottom()
+})
 
 async function send() {
   const text = inputText.value.trim()

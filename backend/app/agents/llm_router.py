@@ -1,10 +1,10 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable
-from openai import APITimeoutError, RateLimitError, APIConnectionError
+from openai import APITimeoutError, RateLimitError, APIConnectionError, InternalServerError, BadRequestError
 from app.config import get_settings
 
-_FALLBACK_ERRORS = (APITimeoutError, RateLimitError, APIConnectionError, TimeoutError)
+_FALLBACK_ERRORS = (APITimeoutError, RateLimitError, APIConnectionError, TimeoutError, InternalServerError, BadRequestError)
 
 _llm_chain: Runnable | None = None
 _primary_llm: ChatOpenAI | None = None
@@ -15,26 +15,14 @@ def _make_llm(base_url: str, api_key: str, model: str) -> ChatOpenAI:
         base_url=base_url,
         api_key=api_key or "placeholder",
         model=model,
-        timeout=8,
-    )
-
-
-def _get_providers() -> tuple[ChatOpenAI, ChatOpenAI, ChatOpenAI]:
-    s = get_settings()
-    return (
-        _make_llm(s.deepseek_base_url, s.deepseek_api_key, s.deepseek_model),
-        _make_llm(s.gemini_base_url, s.gemini_api_key, s.gemini_model),
-        _make_llm(s.openai_base_url, s.openai_api_key, s.openai_model),
+        timeout=get_settings().llm_timeout,
     )
 
 
 def _build_chain() -> tuple[Runnable, ChatOpenAI]:
-    primary, gemini, openai_llm = _get_providers()
-    chain = primary.with_fallbacks(
-        [gemini, openai_llm],
-        exceptions_to_handle=_FALLBACK_ERRORS,
-    )
-    return chain, primary
+    s = get_settings()
+    primary = _make_llm(s.deepseek_base_url, s.deepseek_api_key, s.deepseek_model)
+    return primary, primary
 
 
 def get_llm_chain() -> Runnable:
@@ -53,12 +41,12 @@ def get_primary_llm() -> ChatOpenAI:
 
 
 def get_structured_chain(schema: type) -> Runnable:
-    """每个供应商独立绑定 schema，降级链整体保留 structured output 能力。"""
+    """每个供应商独立绑定 schema，用 function_calling 兼容 DeepSeek 等非 OpenAI 供应商。"""
     primary, gemini, openai_llm = _get_providers()
-    return primary.with_structured_output(schema).with_fallbacks(
+    return primary.with_structured_output(schema, method="function_calling").with_fallbacks(
         [
-            gemini.with_structured_output(schema),
-            openai_llm.with_structured_output(schema),
+            gemini.with_structured_output(schema, method="function_calling"),
+            openai_llm.with_structured_output(schema, method="function_calling"),
         ],
         exceptions_to_handle=_FALLBACK_ERRORS,
     )

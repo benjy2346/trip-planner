@@ -10,12 +10,6 @@ from dotenv import load_dotenv
 # 首先尝试加载当前目录的.env
 load_dotenv()
 
-# 然后尝试加载HelloAgents的.env(如果存在)
-helloagents_env = Path(__file__).parent.parent.parent.parent / "HelloAgents" / ".env"
-if helloagents_env.exists():
-    load_dotenv(helloagents_env, override=False)  # 不覆盖已有的环境变量
-
-
 class Settings(BaseSettings):
     """应用配置"""
 
@@ -63,7 +57,7 @@ class Settings(BaseSettings):
 
     # 日志配置
     log_level: str = "INFO"
-
+    llm_timeout: int = 30  # LLM调用超时时间，单位秒
     class Config:
         env_file = ".env"
         case_sensitive = False
