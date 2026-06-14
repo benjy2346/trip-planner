@@ -62,9 +62,10 @@ async def startup_event():
         raise
     await init_amap_tools()
     from ..services.checkpointer import init_checkpointer
-    from ..agents import init_supervisor_graph
+    from ..agents import init_supervisor_graph, init_chat_graph
     checkpointer = await init_checkpointer()
     init_supervisor_graph(checkpointer)
+    init_chat_graph(checkpointer)
     print("\n" + "="*60)
     print("📚 API文档: http://localhost:8000/docs")
     print("="*60 + "\n")
