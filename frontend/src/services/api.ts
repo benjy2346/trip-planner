@@ -38,9 +38,21 @@ apiClient.interceptors.response.use(
 /**
  * 生成旅行计划
  */
+function getUserId(): string {
+  let id = localStorage.getItem('trip_user_id')
+  if (!id) {
+    id = crypto.randomUUID()
+    localStorage.setItem('trip_user_id', id)
+  }
+  return id
+}
+
 export async function generateTripPlan(formData: TripFormData): Promise<TripPlanResponse> {
   try {
-    const response = await apiClient.post<TripPlanResponse>('/api/trip/plan', formData)
+    const response = await apiClient.post<TripPlanResponse>('/api/trip/plan', {
+      ...formData,
+      user_id: getUserId(),
+    })
     return response.data
   } catch (error: any) {
     console.error('生成旅行计划失败:', error)

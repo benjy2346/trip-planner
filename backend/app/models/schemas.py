@@ -1,6 +1,7 @@
 """数据模型定义"""
 
 from typing import List, Optional, Union
+from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator
 from datetime import date
 
@@ -9,6 +10,7 @@ from datetime import date
 
 class TripRequest(BaseModel):
     """旅行规划请求"""
+    user_id: str = Field(default_factory=lambda: str(uuid4()), description="用户唯一标识")
     city: str = Field(..., description="目的地城市", example="北京")
     start_date: str = Field(..., description="开始日期 YYYY-MM-DD", example="2025-06-01")
     end_date: str = Field(..., description="结束日期 YYYY-MM-DD", example="2025-06-03")

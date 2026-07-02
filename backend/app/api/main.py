@@ -3,7 +3,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from ..config import get_settings, validate_config, print_config
-from .routes import trip, poi, map as map_routes
+from ..services.amap_tools import init_amap_tools, close_amap_tools
+from .routes import trip, poi, map as map_routes, chat as chat_routes
 
 # 获取配置
 settings = get_settings()
@@ -30,6 +31,19 @@ app.add_middleware(
 app.include_router(trip.router, prefix="/api")
 app.include_router(poi.router, prefix="/api")
 app.include_router(map_routes.router, prefix="/api")
+app.include_router(chat_routes.router, prefix="/api")
+
+
+def _setup_langsmith():
+    import os
+    s = get_settings()
+    if s.langchain_tracing_v2 == "true" and s.langchain_api_key:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = s.langchain_api_key
+        os.environ["LANGCHAIN_PROJECT"] = s.langchain_project
+        print(f"✅ LangSmith 追踪已启用，项目：{s.langchain_project}")
+    else:
+        print("ℹ️  LangSmith 追踪未启用")
 
 
 @app.on_event("startup")
@@ -38,31 +52,31 @@ async def startup_event():
     print("\n" + "="*60)
     print(f"🚀 {settings.app_name} v{settings.app_version}")
     print("="*60)
-    
-    # 打印配置信息
+    _setup_langsmith()
     print_config()
-    
-    # 验证配置
     try:
         validate_config()
         print("\n✅ 配置验证通过")
     except ValueError as e:
         print(f"\n❌ 配置验证失败:\n{e}")
-        print("\n请检查.env文件并确保所有必要的配置项都已设置")
         raise
-    
+    await init_amap_tools()
+    from ..services.checkpointer import init_checkpointer
+    from ..agents import init_supervisor_graph, init_chat_graph
+    checkpointer = await init_checkpointer()
+    init_supervisor_graph(checkpointer)
+    init_chat_graph(checkpointer)
     print("\n" + "="*60)
     print("📚 API文档: http://localhost:8000/docs")
-    print("📖 ReDoc文档: http://localhost:8000/redoc")
     print("="*60 + "\n")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """应用关闭事件"""
-    print("\n" + "="*60)
-    print("👋 应用正在关闭...")
-    print("="*60 + "\n")
+    await close_amap_tools()
+    from ..services.checkpointer import close_checkpointer
+    await close_checkpointer()
+    print("\n👋 应用已关闭")
 
 
 @app.get("/")

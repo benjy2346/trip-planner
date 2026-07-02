@@ -1,0 +1,20 @@
+agents:
+  intent_classifier:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.0
+
+  modify_handler:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.7
+
+  assembler:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.7
+
+  state_trimmer:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.0
