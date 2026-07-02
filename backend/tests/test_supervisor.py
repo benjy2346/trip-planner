@@ -37,22 +37,20 @@ async def test_supervisor_returns_trip_plan():
 
     plan_json = '{"city":"北京","start_date":"2025-06-01","end_date":"2025-06-03","days":[],"overall_suggestions":"推荐早起"}'
 
-    mock_plan = TripPlan(city="北京", start_date="2025-06-01", end_date="2025-06-03",
-                         days=[], overall_suggestions="推荐早起")
-    mock_chain = MagicMock()
-    mock_chain.ainvoke = AsyncMock(return_value=mock_plan)
+    mock_response = MagicMock()
+    mock_response.content = plan_json
 
     with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
          patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
          patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.get_structured_chain", return_value=mock_chain):
+         patch("app.agents.supervisor.acall_with_fallback", AsyncMock(return_value=mock_response)):
 
         mock_w.ainvoke = AsyncMock(return_value={"weather_result": weather_out})
         mock_h.ainvoke = AsyncMock(return_value={"hotel_result": hotel_out})
         mock_p.ainvoke = AsyncMock(return_value={"poi_result": poi_out})
 
-        from app.agents.supervisor import supervisor_graph
-        result = await supervisor_graph.ainvoke(_make_initial_state(_make_request()))
+        from app.agents.supervisor import create_supervisor_graph
+        result = await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
 
     assert result["trip_plan"] is not None
     assert result["trip_plan"].city == "北京"
@@ -60,22 +58,22 @@ async def test_supervisor_returns_trip_plan():
 
 @pytest.mark.asyncio
 async def test_all_three_subgraphs_invoked():
-    mock_plan = TripPlan(city="北京", start_date="2025-06-01", end_date="2025-06-03",
-                         days=[], overall_suggestions="ok")
-    mock_chain = MagicMock()
-    mock_chain.ainvoke = AsyncMock(return_value=mock_plan)
+    plan_json = '{"city":"北京","start_date":"2025-06-01","end_date":"2025-06-03","days":[],"overall_suggestions":"ok"}'
+
+    mock_response = MagicMock()
+    mock_response.content = plan_json
 
     with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
          patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
          patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.get_structured_chain", return_value=mock_chain):
+         patch("app.agents.supervisor.acall_with_fallback", AsyncMock(return_value=mock_response)):
 
         mock_w.ainvoke = AsyncMock(return_value={"weather_result": []})
         mock_h.ainvoke = AsyncMock(return_value={"hotel_result": []})
         mock_p.ainvoke = AsyncMock(return_value={"poi_result": []})
 
-        from app.agents.supervisor import supervisor_graph
-        await supervisor_graph.ainvoke(_make_initial_state(_make_request()))
+        from app.agents.supervisor import create_supervisor_graph
+        await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
 
     mock_w.ainvoke.assert_called_once()
     mock_h.ainvoke.assert_called_once()
