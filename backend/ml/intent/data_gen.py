@@ -12,6 +12,8 @@ from app.agents.llm_router import acall_with_fallback
 from langchain_core.messages import SystemMessage, HumanMessage
 
 PER_LABEL = 300
+BATCH_SIZE = 60  # 每次 LLM 请求生成的条数（单次请求 300 条会超过 30s 超时）
+MAX_ROUNDS_PER_LABEL = 10  # 安全上限，避免模型持续返回重复而死循环
 OUT_PATH = Path(__file__).resolve().parent / "data" / "train.jsonl"
 
 _LABEL_DESC = {
@@ -44,30 +46,37 @@ def dedup(rows: list[dict]) -> list[dict]:
 
 
 async def _gen_label(label: str, n: int) -> list[dict]:
-    resp = await acall_with_fallback([
-        SystemMessage(content="你是数据标注助手，只输出要求的内容。"),
-        HumanMessage(content=build_prompt(label, n)),
-    ])
-    rows = []
-    for line in resp.content.splitlines():
-        text = line.strip().strip("\"'　 ")
-        if text:
-            rows.append({"text": text, "label": label})
-    return rows
+    """分批向 LLM 请求，累积去重直到达到 n 条（单次请求 n 太大会超时）。"""
+    seen: set[str] = set()
+    rows: list[dict] = []
+    rounds = 0
+    while len(rows) < n and rounds < MAX_ROUNDS_PER_LABEL:
+        rounds += 1
+        resp = await acall_with_fallback([
+            SystemMessage(content="你是数据标注助手，只输出要求的内容。"),
+            HumanMessage(content=build_prompt(label, BATCH_SIZE)),
+        ])
+        for line in resp.content.splitlines():
+            text = line.strip().strip("\"'　 ")
+            if text and text not in seen:
+                seen.add(text)
+                rows.append({"text": text, "label": label})
+    return rows[:n]
 
 
 async def main() -> None:
-    all_rows: list[dict] = []
-    for label in INTENT_LABELS:
-        rows = await _gen_label(label, PER_LABEL)
-        print(f"{label}: 生成 {len(rows)} 条")
-        all_rows.extend(rows)
-    all_rows = dedup(all_rows)
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    # 逐类写入并 flush，单类失败不会丢失已生成的其他类
     with open(OUT_PATH, "w", encoding="utf-8") as f:
-        for r in all_rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"写入 {len(all_rows)} 条到 {OUT_PATH}")
+        for label in INTENT_LABELS:
+            rows = dedup(await _gen_label(label, PER_LABEL))
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            f.flush()
+            total += len(rows)
+            print(f"{label}: 写入 {len(rows)} 条（累计 {total}）")
+    print(f"完成，共写入 {total} 条到 {OUT_PATH}")
 
 
 if __name__ == "__main__":
