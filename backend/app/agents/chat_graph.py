@@ -5,16 +5,12 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 from app.agents.state import SupervisorState
 from app.agents.intent_classifier import classify_intent
+from app.agents.intent_labels import INTENT_TO_NODE, QUERY_INTENT_FIELD
 from app.agents.llm_router import get_agent_llm
 from app.models.schemas import TripPlan
 
 _DAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
             "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-_INTENT_TO_NODE = {
-    "query_plan": "query_handler",
-    "modify": "modify_handler",
-    "other": "other_handler",
-}
 
 
 def _parse_day(message: str) -> int | None:
@@ -27,19 +23,39 @@ def _parse_day(message: str) -> int | None:
     return None
 
 
-def _build_query_reply(message: str, state: SupervisorState) -> str:
+def _weather_summary(plan: TripPlan) -> str:
+    if not plan.weather_info:
+        return "暂无天气信息。"
+    lines = [
+        f"{w.date}：{w.day_weather}，白天 {w.day_temp}°C / 夜间 {w.night_temp}°C"
+        for w in plan.weather_info
+    ]
+    return "天气预报：\n" + "\n".join(lines)
+
+
+def _hotel_summary(plan: TripPlan) -> str:
+    lines = [
+        f"第{i}天：{d.hotel.name}（{d.hotel.address}），约 {d.hotel.estimated_cost} 元/晚"
+        for i, d in enumerate(plan.days, 1) if d.hotel
+    ]
+    return "住宿安排：\n" + "\n".join(lines) if lines else "暂无酒店信息。"
+
+
+def _attraction_summary(plan: TripPlan) -> str:
+    lines = [
+        f"第{i}天：{a.name}（建议 {a.visit_duration} 分钟）"
+        for i, d in enumerate(plan.days, 1) for a in d.attractions
+    ]
+    return "景点安排：\n" + "\n".join(lines) if lines else "暂无景点信息。"
+
+
+def _build_query_reply(message: str, state: SupervisorState, intent: str | None = None) -> str:
     plan: TripPlan | None = state.get("trip_plan")
     if not plan:
         return "还没有生成行程，请先规划行程。"
 
     if re.search(r"(天气|温度|气温)", message):
-        if not plan.weather_info:
-            return "暂无天气信息。"
-        lines = [
-            f"{w.date}：{w.day_weather}，白天 {w.day_temp}°C / 夜间 {w.night_temp}°C"
-            for w in plan.weather_info
-        ]
-        return "天气预报：\n" + "\n".join(lines)
+        return _weather_summary(plan)
 
     if re.search(r"(预算|费用|花多少|多少钱)", message):
         b = plan.budget
@@ -80,13 +96,21 @@ def _build_query_reply(message: str, state: SupervisorState) -> str:
 
         return f"第{day}天（{d.date}）：{d.description}"
 
+    field = QUERY_INTENT_FIELD.get(intent or "")
+    if field == "weather":
+        return _weather_summary(plan)
+    if field == "hotel":
+        return _hotel_summary(plan)
+    if field == "attraction":
+        return _attraction_summary(plan)
+
     return "请问您想了解行程的哪部分？可以询问天气、预算、各天的景点、酒店或餐饮安排。"
 
 
 async def query_handler_node(state: SupervisorState) -> dict:
     messages = state.get("messages", [])
     user_message = messages[-1].content if messages else ""
-    reply = _build_query_reply(user_message, state)
+    reply = _build_query_reply(user_message, state, state.get("intent"))
     return {"messages": [AIMessage(content=reply)]}
 
 
@@ -139,7 +163,7 @@ async def classify_intent_node(state: SupervisorState) -> Command:
     if not messages:
         return Command(goto="other_handler")
     intent = await classify_intent(messages[-1].content)
-    return Command(goto=_INTENT_TO_NODE[intent])
+    return Command(goto=INTENT_TO_NODE[intent], update={"intent": intent})
 
 
 def create_chat_graph(checkpointer=None):
