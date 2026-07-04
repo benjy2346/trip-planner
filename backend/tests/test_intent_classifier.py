@@ -52,14 +52,16 @@ async def test_model_high_confidence_returned():
 
 @pytest.mark.asyncio
 async def test_model_low_confidence_falls_back_to_llm():
-    mock_result = IntentResult(intent="plan_change", confidence=0.95)
+    # LLM 返回的意图故意不同于默认兜底值 plan_change，以证明确实走了 LLM 层
+    mock_result = IntentResult(intent="query_weather", confidence=0.95)
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=mock_result)
     with patch("app.agents.intent_classifier.intent_model.predict",
                return_value=("query_hotel", 0.4)), \
          patch("app.agents.intent_classifier.get_agent_llm", return_value=mock_llm):
         result = await classify_intent("嗯那个你看着办")
-    assert result == "plan_change"
+    assert result == "query_weather"
+    mock_llm.with_structured_output.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -83,3 +85,5 @@ async def test_llm_exception_defaults_to_plan_change():
          patch("app.agents.intent_classifier.get_agent_llm", return_value=mock_llm):
         result = await classify_intent("随便改改")
     assert result == "plan_change"
+    # 证明确实到达了 LLM 层（异常后才默认 plan_change），而非提前静默默认
+    mock_llm.with_structured_output.assert_called_once()
