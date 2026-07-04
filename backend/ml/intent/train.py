@@ -59,7 +59,8 @@ def main() -> None:
         })
 
     def tok(batch):
-        return tokenizer(batch["text"], truncation=True, max_length=MAX_LEN)
+        # padding 到固定长度，使默认 collator 得到等长张量（否则变长文本会在第一个 batch 崩溃）
+        return tokenizer(batch["text"], truncation=True, padding="max_length", max_length=MAX_LEN)
 
     train_ds = to_ds(load_jsonl(TRAIN_PATH)).map(tok, batched=True)
     eval_rows = load_jsonl(EVAL_PATH)
