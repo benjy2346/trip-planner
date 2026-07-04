@@ -19,8 +19,10 @@ def test_predict_returns_label_and_confidence():
     assert conf == pytest.approx(0.82)
 
 
-def test_missing_model_dir_raises_unavailable():
+def test_missing_model_dir_raises_unavailable(monkeypatch):
+    from pathlib import Path
     intent_model.reset()
-    with patch.object(intent_model.MODEL_DIR, "exists", return_value=False):
-        with pytest.raises(intent_model.IntentModelUnavailable):
-            intent_model.get_pipeline()
+    # 指向不存在的路径，无需 mock Path.exists（pathlib.Path 是 __slots__，不可实例级打补丁）
+    monkeypatch.setattr(intent_model, "MODEL_DIR", Path("/nonexistent/intent_classifier"))
+    with pytest.raises(intent_model.IntentModelUnavailable):
+        intent_model.get_pipeline()

@@ -1,22 +1,7 @@
 """微调意图分类模型的进程内单例推理封装。"""
-from pathlib import Path as _Path
+from pathlib import Path
 
-
-class _ModelDirPath:
-    """Wrapper around Path to allow mocking of exists() method."""
-    def __init__(self, path):
-        self._path = _Path(path)
-
-    def exists(self):
-        return self._path.exists()
-
-    def __str__(self):
-        return str(self._path)
-
-
-MODEL_DIR = _ModelDirPath(
-    _Path(__file__).resolve().parent.parent.parent / "models" / "intent_classifier"
-)
+MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models" / "intent_classifier"
 
 _pipeline = None
 
