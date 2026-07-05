@@ -198,10 +198,14 @@ python -m ml.intent.train      # 微调并保存到 models/intent_classifier/
 
 模型产物与合成训练数据不入库；手写测试集 `ml/intent/eval.jsonl`（125 条）用于评估。
 
-**当前评估结果**（手写测试集）：macro-F1 **0.872**、accuracy 0.872。各类 recall 中
-`query_attraction` 偏低（0.68）——LLM 合成训练数据的说法比手写测试集更单一，模型
-对该类的口语化问法覆盖不足。后续可通过为该类补充更多样化的合成数据重训改善；运行时
-低置信度样本会走 LLM 兜底，不影响可用性。
+**评估结果**（手写测试集，训练集已剔除与测试集重叠的句子，确保无数据泄漏）：
+macro-F1 **0.968**、accuracy 0.968，每类 recall 均 ≥ 0.88
+（query_weather / query_hotel / other 达 1.00，plan_change 0.96，query_attraction 0.88）。
+
+早期版本 macro-F1 仅 0.872、`query_attraction` recall 0.68——合成数据说法偏单一，
+未覆盖口语化的「餐饮 / 按天游览」问法，且 query 与 plan_change 边界不清。通过改进
+`data_gen` 提示词（补充短口语问法、餐饮与按天游览问法，并强调「查询信息」与
+「要求改动行程」的区分）重训后达到上述结果。运行时低置信度样本仍会走 LLM 兜底。
 
 ## 📄 API文档
 
