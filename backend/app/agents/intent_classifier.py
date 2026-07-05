@@ -1,10 +1,11 @@
+import asyncio
 import re
 from typing import Literal
 from pydantic import BaseModel
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.agents.llm_router import get_agent_llm
+from app.agents.intent_labels import INTENT_LABELS
 from app.agents import intent_model
-from app.agents.intent_model import IntentModelUnavailable
 
 Intent = Literal["query_weather", "query_attraction", "query_hotel", "plan_change", "other"]
 
@@ -77,11 +78,11 @@ async def classify_intent(message: str) -> Intent:
         return rule_result
 
     try:
-        label, confidence = intent_model.predict(message)
-        if confidence >= CONFIDENCE_THRESHOLD:
+        # 在线程里跑同步推理（含首次懒加载），避免阻塞 async 事件循环
+        label, confidence = await asyncio.to_thread(intent_model.predict, message)
+        # 校验标签在 5 类之内，避免离约定的 checkpoint 把非法标签传到路由层
+        if confidence >= CONFIDENCE_THRESHOLD and label in INTENT_LABELS:
             return label  # type: ignore[return-value]
-    except IntentModelUnavailable:
-        pass
     except Exception:
         pass
 

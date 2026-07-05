@@ -1,7 +1,14 @@
+from typing import get_args
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from app.agents.intent_classifier import classify_by_rules, classify_intent, IntentResult
+from app.agents.intent_classifier import classify_by_rules, classify_intent, IntentResult, Intent
+from app.agents.intent_labels import INTENT_LABELS
 from app.agents.intent_model import IntentModelUnavailable
+
+
+def test_intent_literal_matches_labels():
+    # Intent Literal 与单一标签源不能漂移
+    assert set(get_args(Intent)) == set(INTENT_LABELS)
 
 
 # --- 规则层 ---
