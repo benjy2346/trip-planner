@@ -181,6 +181,28 @@ Agent可以自动调用以下高德地图MCP工具:
 - `maps_direction_driving_by_address`: 驾车路线规划
 - `maps_direction_transit_integrated_by_address`: 公共交通路线规划
 
+### 意图分类模型（微调）
+
+对话意图由一个微调的中文 BERT 分类器（`hfl/chinese-roberta-wwm-ext`，5 类）识别，
+取代原先的 LLM 分类层。分类分三层：正则快路径 → 本地模型推理 → 低置信度时 LLM 兜底。
+
+意图类别：`query_weather` / `query_attraction` / `query_hotel` / `plan_change` / `other`。
+
+复现训练：
+
+```bash
+cd backend
+python -m ml.intent.data_gen   # 用 LLM 合成训练数据 → ml/intent/data/train.jsonl（约 300/类）
+python -m ml.intent.train      # 微调并保存到 models/intent_classifier/
+```
+
+模型产物与合成训练数据不入库；手写测试集 `ml/intent/eval.jsonl`（125 条）用于评估。
+
+**当前评估结果**（手写测试集）：macro-F1 **0.872**、accuracy 0.872。各类 recall 中
+`query_attraction` 偏低（0.68）——LLM 合成训练数据的说法比手写测试集更单一，模型
+对该类的口语化问法覆盖不足。后续可通过为该类补充更多样化的合成数据重训改善；运行时
+低置信度样本会走 LLM 兜底，不影响可用性。
+
 ## 📄 API文档
 
 启动后端服务后,访问 `http://localhost:8000/docs` 查看完整的API文档。
