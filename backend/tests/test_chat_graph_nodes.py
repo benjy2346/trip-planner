@@ -128,24 +128,44 @@ async def test_modify_handler_calls_llm_and_returns_updated_plan():
 
 
 @pytest.mark.asyncio
-async def test_classify_intent_node_routes_to_query():
+async def test_classify_intent_node_routes_query_hotel_to_query_handler():
     from unittest.mock import AsyncMock, patch
     from app.agents.chat_graph import classify_intent_node
 
-    with patch("app.agents.chat_graph.classify_intent", AsyncMock(return_value="query_plan")):
+    with patch("app.agents.chat_graph.classify_intent", AsyncMock(return_value="query_hotel")):
         state = _make_state("第一天住哪")
         cmd = await classify_intent_node(state)
 
     assert cmd.goto == "query_handler"
+    assert cmd.update["intent"] == "query_hotel"
 
 
 @pytest.mark.asyncio
-async def test_classify_intent_node_routes_to_modify():
+async def test_classify_intent_node_routes_plan_change_to_modify():
     from unittest.mock import AsyncMock, patch
     from app.agents.chat_graph import classify_intent_node
 
-    with patch("app.agents.chat_graph.classify_intent", AsyncMock(return_value="modify")):
+    with patch("app.agents.chat_graph.classify_intent", AsyncMock(return_value="plan_change")):
         state = _make_state("帮我改一下")
         cmd = await classify_intent_node(state)
 
     assert cmd.goto == "modify_handler"
+    assert cmd.update["intent"] == "plan_change"
+
+
+@pytest.mark.asyncio
+async def test_query_handler_uses_intent_hint_for_weather():
+    from app.agents.chat_graph import query_handler_node
+    state = _make_state("那几天冷不冷")  # 无「天气」字样，靠 intent 提示
+    state["intent"] = "query_weather"
+    result = await query_handler_node(state)
+    assert "晴" in result["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_query_handler_uses_intent_hint_for_attraction():
+    from app.agents.chat_graph import query_handler_node
+    state = _make_state("有啥安排")
+    state["intent"] = "query_attraction"
+    result = await query_handler_node(state)
+    assert "故宫" in result["messages"][0].content

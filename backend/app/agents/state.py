@@ -1,5 +1,5 @@
 import operator
-from typing import TypedDict, Annotated, Optional
+from typing import TypedDict, Annotated, Optional, NotRequired
 from langgraph.graph.message import add_messages
 from app.models.schemas import TripRequest, TripPlan, WeatherInfo, Hotel, Attraction
 
@@ -12,6 +12,7 @@ class SupervisorState(TypedDict):
     weather_outputs: Annotated[list, operator.add]
     hotel_outputs: Annotated[list, operator.add]
     poi_outputs: Annotated[list, operator.add]
+    intent: NotRequired[str]
 
 
 class WeatherSubState(TypedDict):

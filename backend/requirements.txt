@@ -25,6 +25,13 @@ python-multipart>=0.0.9
 loguru>=0.7.0
 python-dateutil>=2.8.2
 
+# 意图分类模型（微调）
+torch>=2.2.0
+transformers>=4.46.0
+datasets>=2.19.0
+scikit-learn>=1.4.0
+accelerate>=0.30.0
+
 # 测试
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

@@ -49,3 +49,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# 微调模型产物与合成数据
+models/
+ml/intent/data/

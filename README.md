@@ -181,6 +181,32 @@ Agent可以自动调用以下高德地图MCP工具:
 - `maps_direction_driving_by_address`: 驾车路线规划
 - `maps_direction_transit_integrated_by_address`: 公共交通路线规划
 
+### 意图分类模型（微调）
+
+对话意图由一个微调的中文 BERT 分类器（`hfl/chinese-roberta-wwm-ext`，5 类）识别，
+取代原先的 LLM 分类层。分类分三层：正则快路径 → 本地模型推理 → 低置信度时 LLM 兜底。
+
+意图类别：`query_weather` / `query_attraction` / `query_hotel` / `plan_change` / `other`。
+
+复现训练：
+
+```bash
+cd backend
+python -m ml.intent.data_gen   # 用 LLM 合成训练数据 → ml/intent/data/train.jsonl（约 300/类）
+python -m ml.intent.train      # 微调并保存到 models/intent_classifier/
+```
+
+模型产物与合成训练数据不入库；手写测试集 `ml/intent/eval.jsonl`（125 条）用于评估。
+
+**评估结果**（手写测试集，训练集已剔除与测试集重叠的句子，确保无数据泄漏）：
+macro-F1 **0.968**、accuracy 0.968，每类 recall 均 ≥ 0.88
+（query_weather / query_hotel / other 达 1.00，plan_change 0.96，query_attraction 0.88）。
+
+早期版本 macro-F1 仅 0.872、`query_attraction` recall 0.68——合成数据说法偏单一，
+未覆盖口语化的「餐饮 / 按天游览」问法，且 query 与 plan_change 边界不清。通过改进
+`data_gen` 提示词（补充短口语问法、餐饮与按天游览问法，并强调「查询信息」与
+「要求改动行程」的区分）重训后达到上述结果。运行时低置信度样本仍会走 LLM 兜底。
+
 ## 📄 API文档
 
 启动后端服务后,访问 `http://localhost:8000/docs` 查看完整的API文档。
