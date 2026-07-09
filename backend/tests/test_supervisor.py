@@ -43,7 +43,7 @@ async def test_supervisor_returns_trip_plan():
     with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
          patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
          patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.acall_with_fallback", AsyncMock(return_value=mock_response)):
+         patch("app.agents.supervisor.acall_agent_with_fallback", AsyncMock(return_value=mock_response)):
 
         mock_w.ainvoke = AsyncMock(return_value={"weather_result": weather_out})
         mock_h.ainvoke = AsyncMock(return_value={"hotel_result": hotel_out})
@@ -66,7 +66,7 @@ async def test_all_three_subgraphs_invoked():
     with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
          patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
          patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.acall_with_fallback", AsyncMock(return_value=mock_response)):
+         patch("app.agents.supervisor.acall_agent_with_fallback", AsyncMock(return_value=mock_response)):
 
         mock_w.ainvoke = AsyncMock(return_value={"weather_result": []})
         mock_h.ainvoke = AsyncMock(return_value={"hotel_result": []})
