@@ -1,0 +1,12 @@
+{
+  "trip_planner_sft": {
+    "file_name": "generated/train.json",
+    "formatting": "sharegpt",
+    "columns": {"messages": "conversations", "system": "system"}
+  },
+  "trip_planner_sft_val": {
+    "file_name": "generated/val.json",
+    "formatting": "sharegpt",
+    "columns": {"messages": "conversations", "system": "system"}
+  }
+}
