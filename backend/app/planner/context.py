@@ -6,6 +6,7 @@ import json
 from datetime import date, timedelta
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from app.models.schemas import TripRequest, WeatherInfo, Hotel, Attraction
+from app.planner.pricing import hotel_price, meal_cost_table, city_tier
 
 PRICING_POLICY = {
     "hotel_price_unit": "单间每晚(元)",
@@ -20,10 +21,10 @@ PLANNER_SYSTEM_PROMPT = """你是行程规划专家。输入是一份 JSON 格�
 2. days 的数量、date、day_index 必须与 planner_constraints.dates 完全一致。
 3. weather_info 必须逐日复制 tool_snapshot.weather 的数据，温度为纯数字，不得编造。
 4. 每天安排 1-3 个景点，景点必须从 tool_snapshot.attraction_candidates 中选取，并复制其 name/address/location/ticket_price。
-5. 除最后一天外每天 hotel 不能为 null，整个行程连续入住同一家酒店（从 tool_snapshot.hotel_candidates 中选取）；最后一天 hotel 为 null。
+5. 除最后一天外每天 hotel 不能为 null，整个行程连续入住同一家酒店（从 tool_snapshot.hotel_candidates 中选取）；最后一天 hotel 为 null。hotel.estimated_cost 必须复制所选候选酒店的 estimated_cost，不得自行编造房价。
 6. hotel.distance 必须为空字符串 ""，没有路线工具时不得编造距离。
-7. 每天必须包含 breakfast/lunch/dinner 三餐（最后一天也不能缺晚餐），餐饮必须写具体店名，禁止"早餐推荐""附近餐厅""当地小吃""酒店晚餐""无"这类占位词。
-8. 价格口径见 pricing_policy：酒店按单间每晚，门票按成人单人票，餐饮按单人单餐。budget 分项 = 单价 × 对应数量（门票和餐饮要乘 party.total 人数，酒店乘住宿晚数），total 为各分项之和。
+7. 每天必须包含 breakfast/lunch/dinner 三餐（最后一天也不能缺晚餐），餐饮必须写具体店名，禁止"早餐推荐""附近餐厅""当地小吃""酒店晚餐""无"这类占位词。每餐的 estimated_cost 按 pricing_policy.meal_cost_standard 中对应餐型的标准值填写，不得自行编造。
+8. 价格口径见 pricing_policy：酒店按单间每晚（复制候选 estimated_cost），门票按成人单人票（复制候选 ticket_price），餐饮按单人单餐（用 meal_cost_standard）。budget 分项 = 单价 × 对应数量（门票和餐饮要乘 party.total 人数，酒店乘住宿晚数），total 为各分项之和。若预算紧张，优先选更便宜的候选酒店、减少付费景点，把 total 压到 budget_constraint.amount 之内。
 9. 若 budget_constraint.strictness 为 "hard"，budget.total 不得超过 budget_constraint.amount。
 
 输出 JSON 结构（与后端 TripPlan schema 一致）：
@@ -64,6 +65,13 @@ def build_planner_context(
     weather = [w.model_dump() for w in weather_outputs]
     hotels = [h.model_dump() for h in hotel_outputs]
     attractions = [p.model_dump() for p in poi_outputs]
+    # 给候选酒店贴合成价签（仅当地图侧无价时），作为预算成本信号供模型照抄。
+    for idx, h in enumerate(hotels):
+        if not h.get("estimated_cost"):
+            h["estimated_cost"] = hotel_price(request.accommodation, request.city, idx)
+    pricing_policy = dict(PRICING_POLICY)
+    pricing_policy["meal_cost_standard"] = meal_cost_table(request.city)
+    pricing_policy["city_tier"] = city_tier(request.city)
     return {
         "request": {
             "city": request.city,
@@ -82,7 +90,7 @@ def build_planner_context(
             "hotel_on_last_day": False,
             "same_hotel_all_nights": True,
         },
-        "pricing_policy": PRICING_POLICY,
+        "pricing_policy": pricing_policy,
         "tool_snapshot": {
             "weather": weather,
             "hotel_candidates": hotels,
