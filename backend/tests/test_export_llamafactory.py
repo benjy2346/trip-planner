@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -24,3 +25,26 @@ def test_split_deterministic_and_disjoint():
     assert t1 == t2 and v1 == v2
     assert len(v1) == 5
     assert not {id(x) for x in t1} & {id(x) for x in v1}
+
+
+def _plan_with_meals(lunch_dinner_names):
+    """lunch_dinner_names: list of (lunch, dinner) per day."""
+    days = []
+    for i, (lunch, dinner) in enumerate(lunch_dinner_names):
+        days.append({"meals": [
+            {"type": "breakfast", "name": f"早点{i}"},
+            {"type": "lunch", "name": lunch},
+            {"type": "dinner", "name": dinner},
+        ]})
+    return json.dumps({"days": days}, ensure_ascii=False)
+
+
+def test_meal_repeat_count():
+    clean = _plan_with_meals([("面馆A", "菜馆B"), ("面馆C", "菜馆D")])
+    assert export_lf.meal_repeat_count(clean) == 0
+    dup = _plan_with_meals([("堂宴", "临家"), ("堂宴", "临家")])
+    assert export_lf.meal_repeat_count(dup) == 2
+    # 早餐重复不计（只看午晚餐）
+    assert export_lf.meal_repeat_count(clean) == 0
+    # 无法解析的输出按 0 处理（不误伤，交由上游硬过滤）
+    assert export_lf.meal_repeat_count("{坏json") == 0

@@ -16,6 +16,17 @@ RUNS_DIR = Path("ml/planner/data/runs")
 OUT_DIR = Path("ml/planner/llamafactory/generated")
 
 
+def meal_repeat_count(teacher_output: str) -> int:
+    """午晚餐店名重复计数（soft 质量）。解析失败按 0 处理，交由上游硬过滤兜底。"""
+    try:
+        data = json.loads(teacher_output)
+    except Exception:
+        return 0
+    names = [m.get("name") for d in data.get("days", []) for m in d.get("meals", [])
+             if m.get("type") in ("lunch", "dinner")]
+    return len(names) - len(set(names))
+
+
 def to_sharegpt(record: dict) -> dict:
     human = build_planner_messages(record["context"])[1].content
     return {
@@ -41,16 +52,29 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", required=True)
     ap.add_argument("--val-ratio", type=float, default=0.05)
+    ap.add_argument("--allow-meal-repeat", action="store_true",
+                    help="默认丢弃午晚餐重复的记录（只保留 soft_pass 级质量）；加此项则不过滤")
     args = ap.parse_args()
 
     rows = []
+    total_skipped = 0
     for slug in args.runs:
         path = RUNS_DIR / slug / "records.jsonl"
+        kept = skipped = 0
         with open(path, encoding="utf-8") as f:
             for line in f:
-                if line.strip():
-                    rows.append(to_sharegpt(json.loads(line)))
-        print(f"{slug}: 累计 {len(rows)} 条")
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if not args.allow_meal_repeat and meal_repeat_count(record["teacher_output"]) > 0:
+                    skipped += 1
+                    continue
+                rows.append(to_sharegpt(record))
+                kept += 1
+        total_skipped += skipped
+        print(f"{slug}: 保留 {kept} 条，丢弃重复 {skipped} 条，累计 {len(rows)} 条")
+    if total_skipped:
+        print(f"共丢弃午晚餐重复记录 {total_skipped} 条（--allow-meal-repeat 可关闭过滤）")
 
     train, val = split_rows(rows, args.val_ratio)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
