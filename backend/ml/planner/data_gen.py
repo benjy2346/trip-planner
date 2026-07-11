@@ -47,6 +47,7 @@ async def main() -> None:
     ap.add_argument("--seed", type=int, required=True, help="必须与评测集 seed(1000/2000) 不同")
     ap.add_argument("--run-slug", required=True, help="如 260703_smoke20")
     ap.add_argument("--hard-ratio", type=float, default=0.2)
+    ap.add_argument("--workers", type=int, default=4, help="并发样本数（每个再并发3个子图，勿过高以免压垮 MCP）")
     args = ap.parse_args()
 
     run_dir = RUNS_DIR / args.run_slug
@@ -63,6 +64,17 @@ async def main() -> None:
         with open(records_path, encoding="utf-8") as f:
             done = {json.loads(line)["record_id"] for line in f if line.strip()}
 
+    # 写全量 requests.jsonl（含已完成/跳过的，做溯源），并挑出真正要处理的 todo。
+    todo = []
+    with open(run_dir / "requests.jsonl", "w", encoding="utf-8") as freq:
+        for i, req in enumerate(requests):
+            difficulty = "hard" if i >= len(requests) - n_hard else "standard"
+            record_id = f"sft_{args.run_slug}_{i:04d}"
+            freq.write(json.dumps({"record_id": record_id, "request": req.model_dump()},
+                                  ensure_ascii=False) + "\n")
+            if record_id not in done:
+                todo.append((req, difficulty, record_id))
+
     stats = {"requested": len(requests), "eval_overlap_skipped": 0, "context_failed": 0,
              "teacher_failed": 0, "hard_pass": 0, "hard_fail": 0,
              "usage": {"prompt_tokens": 0, "completion_tokens": 0}}
@@ -78,59 +90,66 @@ async def main() -> None:
         (run_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
         return manifest
 
+    sem = asyncio.Semaphore(args.workers)
+
+    async def process(req, difficulty, record_id) -> dict:
+        async with sem:
+            if eval_signature(req) in eval_sigs:
+                return {"kind": "overlap", "record_id": record_id}
+            try:
+                context = await snapshot_context(req)
+            except Exception as e:
+                return {"kind": "context_fail", "record_id": record_id, "error": str(e)}
+            # teacher 生成单条失败（超时/限流等）只记错误并跳过，绝不让整个 run 崩掉丢 manifest。
+            try:
+                response = await teacher.ainvoke(build_planner_messages(context))
+            except Exception as e:
+                return {"kind": "teacher_fail", "record_id": record_id, "error": str(e)}
+            record = {"record_id": record_id, "difficulty": difficulty,
+                      "request": req.model_dump(), "context": context}
+            metrics = evaluate_output(record, response.content)
+            return {"kind": "pass" if metrics["hard_pass"] else "fail",
+                    "record_id": record_id, "record": record, "response": response.content,
+                    "metrics": metrics, "usage": extract_usage(response)}
+
     await init_amap_tools()
+    n = 0
     try:
-        with open(run_dir / "requests.jsonl", "w", encoding="utf-8") as freq, \
-             open(records_path, "a", encoding="utf-8") as frec, \
+        with open(records_path, "a", encoding="utf-8") as frec, \
              open(run_dir / "errors.jsonl", "a", encoding="utf-8") as ferr:
-            for i, req in enumerate(requests):
-                difficulty = "hard" if i >= len(requests) - n_hard else "standard"
-                record_id = f"sft_{args.run_slug}_{i:04d}"
-                freq.write(json.dumps({"record_id": record_id, "request": req.model_dump()},
-                                      ensure_ascii=False) + "\n")
-                if record_id in done:
-                    continue
-                if eval_signature(req) in eval_sigs:
+            for coro in asyncio.as_completed([process(*t) for t in todo]):
+                r = await coro
+                n += 1
+                kind = r["kind"]
+                if kind == "overlap":
                     stats["eval_overlap_skipped"] += 1
                     continue
-                try:
-                    context = await snapshot_context(req)
-                except Exception as e:
+                if kind == "context_fail":
                     stats["context_failed"] += 1
-                    ferr.write(json.dumps({"record_id": record_id, "stage": "context",
-                                           "error": str(e)}, ensure_ascii=False) + "\n")
+                    ferr.write(json.dumps({"record_id": r["record_id"], "stage": "context",
+                                           "error": r["error"]}, ensure_ascii=False) + "\n")
                     continue
-
-                # teacher 生成单条失败（超时/限流等）只记错误并跳过，绝不让整个 run 崩掉丢 manifest。
-                try:
-                    response = await teacher.ainvoke(build_planner_messages(context))
-                except Exception as e:
+                if kind == "teacher_fail":
                     stats["teacher_failed"] += 1
-                    ferr.write(json.dumps({"record_id": record_id, "stage": "teacher",
-                                           "error": str(e)}, ensure_ascii=False) + "\n")
+                    ferr.write(json.dumps({"record_id": r["record_id"], "stage": "teacher",
+                                           "error": r["error"]}, ensure_ascii=False) + "\n")
                     continue
-                usage = extract_usage(response)
-                stats["usage"]["prompt_tokens"] += usage["prompt_tokens"]
-                stats["usage"]["completion_tokens"] += usage["completion_tokens"]
-
-                record = {"record_id": record_id, "difficulty": difficulty,
-                          "request": req.model_dump(), "context": context}
-                metrics = evaluate_output(record, response.content)
-                if metrics["hard_pass"]:
+                stats["usage"]["prompt_tokens"] += r["usage"]["prompt_tokens"]
+                stats["usage"]["completion_tokens"] += r["usage"]["completion_tokens"]
+                if kind == "pass":
                     stats["hard_pass"] += 1
-                    record["teacher_output"] = _strip_fences(response.content)
-                    frec.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    rec = r["record"]
+                    rec["teacher_output"] = _strip_fences(r["response"])
+                    frec.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     frec.flush()
                 else:
                     stats["hard_fail"] += 1
-                    ferr.write(json.dumps({"record_id": record_id, "stage": "audit",
-                                           "violations": metrics["violations"][:10],
-                                           "output": response.content},
-                                          ensure_ascii=False) + "\n")
-                stats["_processed"] = stats.get("_processed", 0) + 1
-                if stats["_processed"] % 25 == 0:
+                    ferr.write(json.dumps({"record_id": r["record_id"], "stage": "audit",
+                                           "violations": r["metrics"]["violations"][:10],
+                                           "output": r["response"]}, ensure_ascii=False) + "\n")
+                if n % 25 == 0:
                     write_manifest()  # 周期性落盘 manifest，长 run 中途也不丢进度
-                print(f"[{i + 1}/{len(requests)}] {record_id} hard_pass={metrics['hard_pass']}")
+                print(f"[{n}/{len(todo)}] {r['record_id']} hard_pass={kind == 'pass'}")
     finally:
         await close_amap_tools()
         manifest = write_manifest()

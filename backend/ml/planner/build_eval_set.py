@@ -44,6 +44,7 @@ async def main() -> None:
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--workers", type=int, default=4, help="并发拍快照数（每个再并发3个子图，勿过高以免压垮 MCP）")
     args = ap.parse_args()
 
     out = Path(args.output)
@@ -54,28 +55,39 @@ async def main() -> None:
             done = {json.loads(line)["record_id"] for line in f if line.strip()}
 
     requests = iter_controlled_requests(args.count, args.difficulty, seed=args.seed)
+    todo = [(i, req, f"{args.difficulty}_{args.seed}_{i:04d}")
+            for i, req in enumerate(requests) if f"{args.difficulty}_{args.seed}_{i:04d}" not in done]
+    total = len(todo)
+
+    sem = asyncio.Semaphore(args.workers)
+
+    async def snapshot_one(req, record_id):
+        async with sem:
+            try:
+                return record_id, req, await snapshot_context(req), None
+            except Exception as e:
+                return record_id, req, None, str(e)
+
     await init_amap_tools()
+    n = 0
     try:
         with open(out, "a", encoding="utf-8") as f:
-            for i, req in enumerate(requests):
-                record_id = f"{args.difficulty}_{args.seed}_{i:04d}"
-                if record_id in done:
-                    continue
-                try:
-                    context = await snapshot_context(req)
-                except Exception as e:
-                    print(f"❌ {record_id}: {e}")
+            for coro in asyncio.as_completed([snapshot_one(req, rid) for _, req, rid in todo]):
+                record_id, req, context, err = await coro
+                n += 1
+                if err is not None:
+                    print(f"❌ {record_id} ({n}/{total}): {err}")
                     continue
                 counts = context["tool_snapshot"]["candidate_counts"]
                 if counts["hotels"] == 0 or counts["attractions"] == 0:
-                    print(f"⚠️ {record_id} 候选不足 {counts}，跳过")
+                    print(f"⚠️ {record_id} ({n}/{total}) 候选不足 {counts}，跳过")
                     continue
                 f.write(json.dumps({
                     "record_id": record_id, "difficulty": args.difficulty,
                     "request": req.model_dump(), "context": context,
                 }, ensure_ascii=False) + "\n")
                 f.flush()
-                print(f"✅ {record_id} ({i + 1}/{len(requests)}) candidates={counts}")
+                print(f"✅ {record_id} ({n}/{total}) candidates={counts}")
     finally:
         await close_amap_tools()
 
