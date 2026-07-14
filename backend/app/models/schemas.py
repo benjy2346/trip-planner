@@ -13,6 +13,7 @@ class PartyInfo(BaseModel):
     adults: int = Field(default=1, ge=1, description="成人数")
     children: int = Field(default=0, ge=0, description="儿童数")
     elders: int = Field(default=0, ge=0, description="老人数")
+    companion_type: str = Field(default="other", description="同行类型", example="couple")
 
     @computed_field
     @property
