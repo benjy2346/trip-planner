@@ -49,6 +49,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Planner 高德/经典POI本地缓存
+.cache/
+
 # 微调模型产物与合成数据
 models/
 ml/intent/data/
