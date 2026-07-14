@@ -1,4 +1,4 @@
-from app.planner.pricing import hotel_price, meal_cost_table, city_tier
+from app.planner.pricing_legacy import hotel_price, meal_cost_table, city_tier
 from app.models.schemas import TripRequest, WeatherInfo, Hotel, Attraction, Location
 from app.planner.context import build_planner_context
 

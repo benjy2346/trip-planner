@@ -6,7 +6,7 @@ import json
 from datetime import date, timedelta
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from app.models.schemas import TripRequest, WeatherInfo, Hotel, Attraction
-from app.planner.pricing import hotel_price, meal_cost_table, city_tier
+from app.planner.pricing_legacy import hotel_price, meal_cost_table, city_tier
 
 PRICING_POLICY = {
     "hotel_price_unit": "单间每晚(元)",
