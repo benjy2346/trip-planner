@@ -1,6 +1,6 @@
 """数据模型定义"""
 
-from typing import List, Optional, Union, Literal
+from typing import List, Optional, Union
 from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator, computed_field
 from datetime import date
@@ -26,10 +26,13 @@ class BudgetConstraint(BaseModel):
     amount: Optional[int] = Field(default=None, ge=0, description="预算金额(元)，None 表示未指定")
     scope: str = Field(default="total", description="预算口径：整趟总额")
     currency: str = Field(default="CNY", description="币种")
-    budget_level: Literal["limited", "comfortable", "premium"] = Field(
-        default="comfortable", description="预算档位")
-    strictness: Literal["hard", "soft"] = Field(
-        default="soft", description="hard 不能超，soft 尽量贴合")
+    budget_level: str = Field(
+        default="comfortable",
+        description="预算档位，如 limited/standard/comfortable/premium/luxury（不再枚举限制，"
+                     "以匹配 app/planner 分级定价与偏好关键词表的实际取值范围）")
+    strictness: str = Field(
+        default="soft",
+        description="预算严格程度：hard 不能超，soft 尽量贴合，none 表示不设预算贴合目标")
 
 
 class TripRequest(BaseModel):
