@@ -1,81 +1,42 @@
-from datetime import date, timedelta
-from langgraph.graph import StateGraph, START, END
-from langgraph.types import Send
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from app.agents.state import SupervisorState, WeatherSubState, HotelSubState, POISubState
-from app.agents.subgraphs.weather import weather_subgraph
-from app.agents.subgraphs.hotel import hotel_subgraph
-from app.agents.subgraphs.poi import poi_subgraph
+import asyncio
 import json
-from app.agents.llm_router import acall_with_fallback, acall_agent_with_fallback
+from datetime import date, timedelta
+
+from langgraph.graph import StateGraph, START, END
+from langchain_core.messages import AIMessage
+
+from app.agents.state import SupervisorState
+from app.agents.llm_router import acall_agent_with_fallback
+from app.config import get_settings
 from app.models.schemas import TripPlan
-from app.planner.context import build_planner_context, build_planner_messages
-from app.planner.validation import validate_trip_plan, recompute_budget
+from app.planner.context import PlannerContextBuilder, build_grounded_planner_messages
+from app.planner.validation import validate_grounded_trip_plan, recompute_grounded_budget
+
+
+_planner_builder = PlannerContextBuilder(amap_api_key=get_settings().amap_api_key)
 
 
 def _date_range(start: str, days: int) -> list[str]:
+    """行程日期序列。仅存量 ml 脚本（build_eval_set）还在引用，保留兼容。"""
     d = date.fromisoformat(start)
     return [(d + timedelta(days=i)).isoformat() for i in range(days)]
 
 
-def dispatch_subgraphs(state: SupervisorState) -> list[Send]:
-    req = state["trip_request"]
-    return [
-        
-        Send("run_weather", WeatherSubState(
-            city=req.city,
-            travel_dates=_date_range(req.start_date, req.travel_days),
-            raw_result="",
-            weather_result=[],
-        )),
-        Send("run_hotel", HotelSubState(
-            city=req.city,
-            accommodation_pref=req.accommodation,
-            budget_level="mid",
-            raw_result="",
-            hotel_result=[],
-        )),
-        Send("run_poi", POISubState(
-            city=req.city,
-            preferences=req.preferences,
-            travel_days=req.travel_days,
-            raw_result="",
-            poi_result=[],
-        )),
-    ]
-
-
-async def run_weather_node(sub_state: WeatherSubState) -> dict:
-    result = await weather_subgraph.ainvoke(sub_state)
-    return {"weather_outputs": result["weather_result"]}
-
-
-async def run_hotel_node(sub_state: HotelSubState) -> dict:
-    result = await hotel_subgraph.ainvoke(sub_state)
-    return {"hotel_outputs": result["hotel_result"]}
-
-
-async def run_poi_node(sub_state: POISubState) -> dict:
-    result = await poi_subgraph.ainvoke(sub_state)
-    return {"poi_outputs": result["poi_result"]}
-
-
 async def assembler_node(state: SupervisorState) -> dict:
     req = state["trip_request"]
-    context = build_planner_context(
-        req,
-        state.get("weather_outputs", []),
-        state.get("hotel_outputs", []),
-        state.get("poi_outputs", []),
-    )
-    response = await acall_agent_with_fallback("assembler", build_planner_messages(context))
+    # collect() 内部用线程池并行取高德结构化数据；它是同步的，放到线程里跑，
+    # 不阻塞事件循环。取数并发已下沉到 Builder，不再需要图层面的子图扇出。
+    context = await asyncio.to_thread(_planner_builder.collect, req)
+    compact = _planner_builder.compact_for_planner(context)
+
+    response = await acall_agent_with_fallback("assembler", build_grounded_planner_messages(compact))
     content = response.content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     trip_plan = TripPlan(**json.loads(content))
 
-    violations = validate_trip_plan(trip_plan, context)
+    violations = validate_grounded_trip_plan(trip_plan, context)
     if violations:
         print(f"⚠️ TripPlan 校验告警 {len(violations)} 条: {violations[:5]}")
-    trip_plan.budget = recompute_budget(trip_plan, context["party"]["total"])
+    trip_plan.budget = recompute_grounded_budget(trip_plan, context["party"]["total"])
 
     return {
         "trip_plan": trip_plan,
@@ -85,13 +46,7 @@ async def assembler_node(state: SupervisorState) -> dict:
 
 def create_supervisor_graph(checkpointer=None):
     builder = StateGraph(SupervisorState)
-    builder.add_node("run_weather", run_weather_node)
-    builder.add_node("run_hotel", run_hotel_node)
-    builder.add_node("run_poi", run_poi_node)
     builder.add_node("assembler", assembler_node)
-    builder.add_conditional_edges(START, dispatch_subgraphs)
-    builder.add_edge("run_weather", "assembler")
-    builder.add_edge("run_hotel", "assembler")
-    builder.add_edge("run_poi", "assembler")
+    builder.add_edge(START, "assembler")
     builder.add_edge("assembler", END)
     return builder.compile(checkpointer=checkpointer)
