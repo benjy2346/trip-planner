@@ -92,7 +92,7 @@ TOURISM_CITY_COORDS: dict[str, tuple[float, float]] = {
 }
 
 
-WEATHER_CODE_TEXT = {
+WEATHER_CODE_TEXT: dict[int, str] = {
     0: "晴",
     1: "晴间多云",
     2: "多云",
