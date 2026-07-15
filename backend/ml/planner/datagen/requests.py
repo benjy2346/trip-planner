@@ -28,6 +28,7 @@ from typing import Any
 
 from app.models.schemas import TripRequest
 from app.planner.policy import NEGATIVE_CONSTRAINT_PHRASES
+from app.planner.pois import NEGATIVE_PREFERENCE_MARKERS, infer_food_constraints
 
 # ---------------------------------------------------------------------------
 # 城市/同行/日期/预算/节奏/饮食 分布权重
@@ -68,7 +69,9 @@ PACE_WEIGHTS: list[tuple[str, int]] = [
     ("适中节奏", 45), ("慢节奏", 35), ("紧凑高效", 12), ("自由活动多", 8),
 ]
 DIET_WEIGHTS: list[tuple[str, int]] = [
-    ("无", 70), ("少辣", 10), ("海鲜过敏", 5), ("清真", 4), ("素食", 4), ("清淡饮食", 7),
+    # "清淡饮食" 从参考实现继承的标签在 app.planner.pois.DIET_PREFERENCE_KEYWORDS 里没有对应词，
+    # 永远无法在真实 preference_profile 里出现（dead label），故不采用；权重并入"无"。
+    ("无", 77), ("少辣", 10), ("海鲜过敏", 5), ("清真", 4), ("素食", 4),
 ]
 
 # 整趟总预算口径：住宿按 N-1 晚两人一间、餐饮门票按人数线性、市内交通按队伍共享日成本，
@@ -95,15 +98,13 @@ THEME_POOL: list[tuple[str, int]] = [
     ("小众展览", 7), ("艺术", 7), ("海滨度假", 6),
 ]
 
-DIET_POSITIVE_BY_LABEL: dict[str, list[str]] = {
-    "少辣": ["少辣"], "清真": ["清真"], "素食": ["素食"], "清淡饮食": ["清淡饮食"],
-}
-DIET_AVOID_BY_LABEL: dict[str, list[str]] = {
-    "海鲜过敏": ["海鲜"], "清真": ["猪肉", "酒"], "素食": ["荤菜"], "少辣": ["重辣"], "清淡饮食": ["重口味"],
-}
+# diet_positive / diet_avoid 不再用手写的 label->词表映射（曾经是死数据源：声明的忌口和
+# app.planner.pois.infer_food_constraints 从 free_text 实际抽出的忌口对不上）。改为在
+# generate_controlled_request 里对已生成的 TripRequest 直接调用 infer_food_constraints，
+# 保证 control_spec.diet_avoid/diet_positive 和模型实际看到的 preference_profile 一致。
 
-# 负向前缀标记：用于把偏好标签里明显是负向表达的项过滤掉，不拿去做正向 POI 召回。
-NEGATIVE_PREFERENCE_MARKERS = ["过敏", "不吃", "不要", "避免", "避开", "忌", "不能", "不想", "别"]
+# NEGATIVE_PREFERENCE_MARKERS 直接复用 app.planner.pois 的定义（上面已 import），
+# 不在本模块重复声明，避免和真实识别词表脱节（曾经手写的 9 项拷贝漏了"禁忌"/"少走路"）。
 
 # avoid_long_walk 只能用 app.planner.policy.build_preference_profile 实际识别的词，
 # 否则 control_spec 里的 avoid_long_walk=True 在真实 preference_profile 里永远是 False。
@@ -266,15 +267,14 @@ def choose_budget_amount(
     return max(500, int(round(raw_total / 100.0) * 100))
 
 
-def build_budget_constraint(
-    rng: random.Random, budget_level: str, amount: int | None, strictness: str | None = None,
-) -> dict[str, Any]:
-    """构造预算约束 dict（budget_level/strictness 值域对齐 app.planner 的价格/偏好关键词表）。"""
-    if strictness:
-        resolved = strictness
-    elif amount is None:
-        resolved = "none"
-    elif budget_level == "limited":
+def build_budget_constraint(rng: random.Random, budget_level: str, amount: int) -> dict[str, Any]:
+    """构造预算约束 dict（budget_level/strictness 值域对齐 app.planner 的价格/偏好关键词表）。
+
+    唯一调用点（generate_controlled_request）里 amount 恒为 choose_budget_amount 算出的整数
+    （从不为 None），也从不传入 strictness——原来的 `if strictness / elif amount is None`
+    分支永远走不到，这里直接去掉，只保留真正会执行的 budget_level 加权抽样。
+    """
+    if budget_level == "limited":
         resolved = weighted_choice(rng, [("soft", 72), ("hard", 20), ("none", 8)])
     else:
         resolved = weighted_choice(rng, [("soft", 88), ("hard", 4), ("none", 8)])
@@ -284,7 +284,7 @@ def build_budget_constraint(
         "scope": "total",
         "currency": "CNY",
         "budget_level": budget_level,
-        "strictness": "none" if amount is None else resolved,
+        "strictness": resolved,
     }
 
 
@@ -377,10 +377,20 @@ def build_controlled_free_text(
 
     每一句都要用 app.planner.policy/pois 真正识别的关键词，否则 control_spec 里声明
     的约束在下游 preference_profile 里就是死的：
-    - diet_text 用 pois.DIET_PREFERENCE_KEYWORDS 能命中的词（少辣/海鲜过敏/清真/素食）；
-      "清淡饮食" 是已知的例外，见模块顶部文档字符串 —— 我们的 pois.py 是 helloagents
-      pois.py 的忠实端口，它自己的 DIET_PREFERENCE_KEYWORDS 里也没有"清淡"，这不是我们
-      引入的新问题，是继承自参考实现的已知缺口。
+    - diet_text 必须同时命中 pois.DIET_PREFERENCE_KEYWORDS（正向 diet 标签）和/或
+      pois.FOOD_AVOID_KEYWORDS + FOOD_AVOID_MARKERS 紧邻搭配（忌口 avoid），逐label验证：
+        * 海鲜过敏 -> "海鲜过敏"（keyword+marker 紧邻）-> avoid=[海鲜]；"海鲜"本身在
+          DIET_PREFERENCE_KEYWORDS 里但因为已进 avoid 被跳过，diet="无"（这是预期行为：
+          过敏是忌口不是正向饮食偏好）。
+        * 清真 -> "清真"关键词命中 diet="清真"；"不吃猪肉、忌酒" -> marker+keyword 紧邻
+          -> avoid=[猪肉,酒]。
+        * 素食 -> "素食"关键词命中 diet="素食"；"不吃牛肉、不吃羊肉、不吃猪肉、不吃海鲜"
+          （每个词前都重复"不吃"以满足紧邻搭配）-> avoid=[海鲜,牛肉,羊肉,猪肉]。
+        * 少辣 -> 文本同时含"少辣"（diet 关键词）和"不吃辣"（marker+keyword 紧邻）
+          -> diet="少辣" 且 avoid=[辣] 同时成立，这是刻意选择的一致处理方式（少辣既是
+          正向饮食标签也隐含忌口"辣"），不是冲突。
+      "清淡饮食" 不在 DIET_PREFERENCE_KEYWORDS 里，永远无法作为 diet 出现，已从
+      DIET_WEIGHTS 里整体去掉（见该常量定义处注释），这里不再处理这个 label。
     - avoid 的每一项都取自 app.planner.policy.NEGATIVE_CONSTRAINT_PHRASES，逐字命中。
     - mobility/无障碍诉求主动补一句用 AVOID_LONG_WALK_MARKERS 里的真词（少走路/不想太累），
       不用参考实现里那种从不触发 avoid_long_walk 的写法（它的 avoid 词池里没有一个词能
@@ -398,11 +408,10 @@ def build_controlled_free_text(
         parts.append("节奏适中就行")
 
     diet_text = {
-        "少辣": "吃饭尽量少辣",
+        "少辣": "口味希望少辣，尽量不吃辣",
         "海鲜过敏": "对海鲜过敏，不要安排海鲜餐厅",
-        "清真": "有清真饮食要求",
-        "素食": "偏素食，餐饮请注意",
-        "清淡饮食": "饮食希望清淡一些",
+        "清真": "有清真饮食要求，不吃猪肉、忌酒",
+        "素食": "素食，不吃牛肉、不吃羊肉、不吃猪肉、不吃海鲜",
     }.get(diet)
     if diet_text:
         parts.append(diet_text)
@@ -423,17 +432,14 @@ def positive_preference_tags(preferences: list[str]) -> list[str]:
     )
 
 
-def diet_positive(diet: str) -> list[str]:
-    return list(DIET_POSITIVE_BY_LABEL.get(diet, []))
+def build_negative_constraints(avoid_pool: list[str], food_avoid: list[str], free_text: str) -> list[str]:
+    """构造造数侧的负向约束标签：显式 avoid_pool 列表 + 真实饮食忌口 + free_text 里命中的负向短语。
 
-
-def diet_avoid(diet: str) -> list[str]:
-    return list(DIET_AVOID_BY_LABEL.get(diet, []))
-
-
-def build_negative_constraints(avoid: list[str], diet: str, free_text: str) -> list[str]:
-    """构造造数侧的负向约束标签：显式 avoid 列表 + 饮食忌口 + free_text 里命中的负向短语。"""
-    results = list(avoid) + diet_avoid(diet)
+    food_avoid 必须是 infer_food_constraints(...)["avoid"] 算出来的真实忌口列表，不是
+    手写映射——否则又会退回到"control_spec 声明的忌口和真实 preference_profile 对不上"
+    的老问题。
+    """
+    results = list(avoid_pool) + list(food_avoid)
     for phrase in NEGATIVE_CONSTRAINT_PHRASES:
         if phrase in free_text:
             results.append(phrase)
@@ -441,19 +447,31 @@ def build_negative_constraints(avoid: list[str], diet: str, free_text: str) -> l
 
 
 def build_preference_control_spec(
-    preferences: list[str], free_text: str, party: dict[str, Any], pace: str, diet: str, avoid: list[str],
+    preferences: list[str],
+    free_text: str,
+    party: dict[str, Any],
+    pace: str,
+    avoid_pool: list[str],
+    food_constraints: dict[str, Any],
 ) -> dict[str, Any]:
-    """把正向偏好/负向约束显式写入 control_spec，键名对齐 app.planner.policy.build_preference_profile。"""
+    """把正向偏好/负向约束显式写入 control_spec，键名对齐 app.planner.policy.build_preference_profile。
+
+    diet_positive/diet_avoid 直接取自 food_constraints（由调用方对已生成的 TripRequest
+    调用 app.planner.pois.infer_food_constraints 算出），保证和模型实际看到的
+    preference_profile 逐字段一致，不能再退化成造数侧自说自话的手写映射。
+    """
     traveler_constraints = {
         "needs_child_friendly": int(party.get("children") or 0) > 0 or "孩子" in free_text or "带娃" in free_text,
         "needs_elder_friendly": int(party.get("elders") or 0) > 0 or "老人" in free_text or "长辈" in free_text,
         "avoid_long_walk": any(marker in free_text for marker in AVOID_LONG_WALK_MARKERS),
     }
+    diet = food_constraints["diet"]
+    food_avoid = food_constraints["avoid"]
     return {
         "positive_preferences": positive_preference_tags(preferences),
-        "negative_constraints": build_negative_constraints(avoid, diet, free_text),
-        "diet_positive": diet_positive(diet),
-        "diet_avoid": diet_avoid(diet),
+        "negative_constraints": build_negative_constraints(avoid_pool, food_avoid, free_text),
+        "diet_positive": [] if diet == "无" else [diet],
+        "diet_avoid": food_avoid,
         "pace": pace,
         "traveler_constraints": traveler_constraints,
     }
@@ -509,10 +527,8 @@ def generate_controlled_request(index: int, *, seed: int, date_mode: str) -> dic
     free_text = build_controlled_free_text(rng, companion_type, budget_amount, diet, pace, avoid)
 
     preferences = themes[:4]
-    preference_spec = build_preference_control_spec(preferences, free_text, party, pace, diet, avoid)
 
-    return {
-        "request_id": format_request_id(index),
+    request_payload: dict[str, Any] = {
         "city": city,
         "start_date": start.isoformat(),
         "end_date": (start + timedelta(days=travel_days - 1)).isoformat(),
@@ -523,6 +539,16 @@ def generate_controlled_request(index: int, *, seed: int, date_mode: str) -> dic
         "free_text_input": free_text,
         "party": party,
         "budget_constraint": budget_constraint,
+    }
+    # diet_avoid/diet_positive 必须来自模型实际会看到的 preference_profile 计算路径，
+    # 所以在这里对已经生成好的 TripRequest 真跑一遍 infer_food_constraints，而不是
+    # 沿用造数侧自己声明的 diet label。
+    food_constraints = infer_food_constraints(to_trip_request(request_payload))
+    preference_spec = build_preference_control_spec(preferences, free_text, party, pace, avoid, food_constraints)
+
+    return {
+        "request_id": format_request_id(index),
+        **request_payload,
         "source": "controlled",
         "control_spec": {
             "companion_type": companion_type,
