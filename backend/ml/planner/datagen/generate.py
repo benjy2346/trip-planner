@@ -128,9 +128,12 @@ async def main() -> None:
     async def process(item: dict) -> dict:
         record_id = item["record_id"]
         async with sem:
-            req = to_trip_request(item)
-            if eval_signature(req) in eval_sigs:
-                return {"kind": "overlap", "record_id": record_id}
+            try:
+                req = to_trip_request(item)
+                if eval_signature(req) in eval_sigs:
+                    return {"kind": "overlap", "record_id": record_id}
+            except Exception as e:
+                return {"kind": "context_fail", "record_id": record_id, "error": str(e), "stage": "request"}
             try:
                 context = await asyncio.to_thread(builder.collect, req)
             except Exception as e:
@@ -147,42 +150,44 @@ async def main() -> None:
                     "violations": violations, "usage": extract_usage(response)}
 
     n = 0
-    with open(records_path, "a", encoding="utf-8") as frec, \
-         open(run_dir / "errors.jsonl", "a", encoding="utf-8") as ferr:
-        for coro in asyncio.as_completed([process(item) for item in todo]):
-            r = await coro
-            n += 1
-            kind = r["kind"]
-            if kind == "overlap":
-                stats["eval_overlap_skipped"] += 1
-                continue
-            if kind == "context_fail":
-                stats["context_failed"] += 1
-                ferr.write(json.dumps({"record_id": r["record_id"], "stage": "context",
-                                       "error": r["error"]}, ensure_ascii=False) + "\n")
-                continue
-            if kind == "teacher_fail":
-                stats["teacher_failed"] += 1
-                ferr.write(json.dumps({"record_id": r["record_id"], "stage": "teacher",
-                                       "error": r["error"]}, ensure_ascii=False) + "\n")
-                continue
-            stats["usage"]["prompt_tokens"] += r["usage"]["prompt_tokens"]
-            stats["usage"]["completion_tokens"] += r["usage"]["completion_tokens"]
-            if kind == "clean":
-                stats["clean"] += 1
-                rec = assemble_record(r["item"], r["context"], r["response"])
-                frec.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                frec.flush()
-            else:
-                stats["dirty"] += 1
-                ferr.write(json.dumps({"record_id": r["record_id"], "stage": "audit",
-                                       "violations": r["violations"][:10],
-                                       "output": r["response"]}, ensure_ascii=False) + "\n")
-            if n % 25 == 0:
-                write_manifest()  # 周期性落盘 manifest，长 run 中途也不丢进度
-            print(f"[{n}/{len(todo)}] {r['record_id']} clean={kind == 'clean'}")
+    try:
+        with open(records_path, "a", encoding="utf-8") as frec, \
+             open(run_dir / "errors.jsonl", "a", encoding="utf-8") as ferr:
+            for coro in asyncio.as_completed([process(item) for item in todo]):
+                r = await coro
+                n += 1
+                kind = r["kind"]
+                if kind == "overlap":
+                    stats["eval_overlap_skipped"] += 1
+                    continue
+                if kind == "context_fail":
+                    stats["context_failed"] += 1
+                    ferr.write(json.dumps({"record_id": r["record_id"], "stage": r.get("stage", "context"),
+                                           "error": r["error"]}, ensure_ascii=False) + "\n")
+                    continue
+                if kind == "teacher_fail":
+                    stats["teacher_failed"] += 1
+                    ferr.write(json.dumps({"record_id": r["record_id"], "stage": "teacher",
+                                           "error": r["error"]}, ensure_ascii=False) + "\n")
+                    continue
+                stats["usage"]["prompt_tokens"] += r["usage"]["prompt_tokens"]
+                stats["usage"]["completion_tokens"] += r["usage"]["completion_tokens"]
+                if kind == "clean":
+                    stats["clean"] += 1
+                    rec = assemble_record(r["item"], r["context"], r["response"])
+                    frec.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    frec.flush()
+                else:
+                    stats["dirty"] += 1
+                    ferr.write(json.dumps({"record_id": r["record_id"], "stage": "audit",
+                                           "violations": r["violations"][:10],
+                                           "output": r["response"]}, ensure_ascii=False) + "\n")
+                if n % 25 == 0:
+                    write_manifest()  # 周期性落盘 manifest，长 run 中途也不丢进度
+                print(f"[{n}/{len(todo)}] {r['record_id']} clean={kind == 'clean'}")
+    finally:
+        manifest = write_manifest()
 
-    manifest = write_manifest()
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
 
 

@@ -1,5 +1,4 @@
 import json
-from app.models.schemas import TripRequest
 from ml.planner.datagen.generate import assemble_record, is_clean
 
 _PLAN = ('{"city":"杭州","start_date":"2020-04-01","end_date":"2020-04-01",'
