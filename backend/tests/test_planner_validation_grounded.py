@@ -112,6 +112,15 @@ def test_lodging_breakfast_is_allowed():
     assert validate_grounded_trip_plan(plan, _ctx()) == []
 
 
+def test_lodging_breakfast_not_flagged_by_diet_substring():
+    """『酒店早餐』含『酒』字，但住宿早餐不是餐厅选择，diet_avoid 的子串匹配
+    不该把它误判为违反忌口（清真=避酒时常见的假阳性）。"""
+    ctx = _ctx(diet_avoid=("酒",))
+    plan = _two_day_plan(meals=_meals(b="酒店早餐", l="绿茶餐厅", d="外婆家"))
+    v = validate_grounded_trip_plan(plan, ctx)
+    assert not any("违反饮食约束" in x for x in v), v
+
+
 def test_lodging_breakfast_only_valid_for_breakfast():
     """同样的名字放在晚餐位上就是没 grounding。"""
     v = validate_grounded_trip_plan(_two_day_plan(meals=_meals(d="酒店早餐")), _ctx())

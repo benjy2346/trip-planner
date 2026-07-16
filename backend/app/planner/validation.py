@@ -209,7 +209,7 @@ def validate_grounded_trip_plan(plan: TripPlan, context: dict) -> list[str]:
                 v.append(f"{label} 餐饮占位词: {m.name}")
             elif not lodging_breakfast and food_candidates and not name_in_candidates(m.name, food_candidates):
                 v.append(f"{label} 餐饮 {m.name} 不在候选中")
-            if any(bad in m.name for bad in diet_avoid):
+            if not lodging_breakfast and any(bad in m.name for bad in diet_avoid):
                 v.append(f"{label} 餐饮 {m.name} 违反饮食约束")
 
             # 住宿早餐不计入去重统计
