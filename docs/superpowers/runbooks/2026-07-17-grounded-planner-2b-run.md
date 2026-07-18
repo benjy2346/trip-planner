@@ -9,16 +9,17 @@
 - 之后所有步骤都能 `ssh autodl 'cmd'` 非交互执行。
 
 ## 1. ⚠️ bnb 4-bit 冒烟（开机第一件事，别跳过）
-QLoRA 依赖 bitsandbytes，其对 Blackwell(sm_120) 的支持是近期才有的。**先验证再训练**：
+QLoRA 依赖 bitsandbytes，其对 Blackwell(sm_120) 的支持是近期才有的。**先验证再训练**——先装 bnb、下模型（一次，ModelScope，国内快），再冒烟，避免冒烟里再触发一次隐式 HuggingFace 下载：
 ```bash
 pip install -U bitsandbytes
+pip install -U modelscope && modelscope download --model Qwen/Qwen2.5-7B-Instruct --local_dir ~/models/Qwen2.5-7B-Instruct
 python - <<'PY'
-import torch, transformers
+import os, torch, transformers
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 print("cuda ok:", torch.zeros(1).cuda().is_cuda, "| cap:", torch.cuda.get_device_capability())
 bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                          bnb_4bit_compute_dtype=torch.bfloat16)
-m = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B-Instruct",
+m = AutoModelForCausalLM.from_pretrained(os.path.expanduser("~/models/Qwen2.5-7B-Instruct"),
         quantization_config=bnb, device_map="cuda", trust_remote_code=True)
 print("4-bit load OK, layers:", m.config.num_hidden_layers)
 PY
@@ -36,10 +37,7 @@ scp backend/ml/planner/llamafactory/generated/val.json   autodl:~/trip-planner/b
 # 装依赖
 ssh autodl 'pip install -U "llamafactory[torch,metrics,bitsandbytes]" vllm langchain-openai'
 ```
-下模型（ModelScope，国内快）：
-```bash
-ssh autodl 'pip install -U modelscope && modelscope download --model Qwen/Qwen2.5-7B-Instruct --local_dir ~/models/Qwen2.5-7B-Instruct'
-```
+模型已在第 1 步（bnb 冒烟前）下到 `~/models/Qwen2.5-7B-Instruct`，此处无需重下。
 > 若用本地已下模型，把两个 yaml 里的 `model_name_or_path` 指到 `~/models/Qwen2.5-7B-Instruct`。
 
 ## 3. 预处理 dry-run（先验证数据集加载 + 截断比例）
@@ -71,15 +69,24 @@ ssh autodl 'cd ~/trip-planner/backend && llamafactory-cli export ml/planner/conf
 ```bash
 # --- base 7B ---
 ssh autodl 'cd ~/trip-planner/backend && nohup python -m vllm.entrypoints.openai.api_server \
-  --model ~/models/Qwen2.5-7B-Instruct --max-model-len 32768 --port 8000 > ~/vllm_base.log 2>&1 &'
+  --model ~/models/Qwen2.5-7B-Instruct --served-model-name base --max-model-len 32768 --port 8000 > ~/vllm_base.log 2>&1 &'
 # 起来后（tail 日志看到 "Uvicorn running"）：
 ssh autodl 'cd ~/trip-planner/backend && \
   python -m ml.planner.eval.generate --records ml/planner/eval/records.jsonl \
     --base-url http://127.0.0.1:8000/v1 --model base --api-key-env NONE --output-dir runs_eval/base_standard && \
   python -m ml.planner.eval.generate --records ml/planner/eval_hard/records.jsonl \
     --base-url http://127.0.0.1:8000/v1 --model base --api-key-env NONE --output-dir runs_eval/base_hard'
-# 停 base vLLM，再起 merged（换 --model 路径，同 --port 8000），跑 ft_standard / ft_hard：
-#   --model ~/trip-planner/backend/ml/planner/outputs/qwen25_7b_qlora_v1_merged --output-dir runs_eval/ft_{standard,hard}
+# --- 停 base vLLM（同端口只能一个实例），再起 merged（ft）---
+ssh autodl 'pkill -f "vllm.entrypoints.openai.api_server"'
+ssh autodl 'cd ~/trip-planner/backend && nohup python -m vllm.entrypoints.openai.api_server \
+  --model ~/trip-planner/backend/ml/planner/outputs/qwen25_7b_qlora_v1_merged --served-model-name ft \
+  --max-model-len 32768 --port 8000 > ~/vllm_ft.log 2>&1 &'
+# 起来后（tail 日志看到 "Uvicorn running"）：
+ssh autodl 'cd ~/trip-planner/backend && \
+  python -m ml.planner.eval.generate --records ml/planner/eval/records.jsonl \
+    --base-url http://127.0.0.1:8000/v1 --model ft --api-key-env NONE --output-dir runs_eval/ft_standard && \
+  python -m ml.planner.eval.generate --records ml/planner/eval_hard/records.jsonl \
+    --base-url http://127.0.0.1:8000/v1 --model ft --api-key-env NONE --output-dir runs_eval/ft_hard'
 # --- DeepSeek（API，无需 GPU）---
 ssh autodl 'cd ~/trip-planner/backend && export DEEPSEEK_API_KEY=<key> && \
   python -m ml.planner.eval.generate --records ml/planner/eval/records.jsonl \
