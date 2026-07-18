@@ -155,18 +155,6 @@ def weighted_choice(rng: random.Random, weighted_items: list[tuple[Any, int]]) -
     return weighted_items[-1][0]
 
 
-def weighted_block_choice(index: int, seed: int, weighted_items: list[tuple[Any, int]], salt: str) -> Any:
-    """按权重构造一个确定性排列块，同一 (seed, salt) 下按 index 取值可复现。"""
-    pool: list[Any] = []
-    for item, weight in weighted_items:
-        pool.extend([item] * weight)
-    if not pool:
-        raise ValueError("weighted_items 不能为空")
-    rng = random.Random(f"{seed}:{salt}:{len(pool)}")
-    rng.shuffle(pool)
-    return pool[index % len(pool)]
-
-
 def sample_many_weighted(
     rng: random.Random, weighted_items: list[tuple[str, int]], min_count: int, max_count: int,
 ) -> list[str]:
