@@ -24,7 +24,16 @@ Plan 2b 分两半，分别在不同环境：
 
 ## 训练配置
 
-复用 Plan 1 的 `ml/planner/configs/qwen25_7b_lora_sft.yaml`（已验证合理）：Qwen2.5-7B-Instruct，LoRA rank 32 / α 64 / dropout 0.05 / target all，cutoff 8192，3 epochs，lr 5e-5，batch 1 × grad_accum 16，bf16，gradient_checkpointing。**只改**：`dataset_dir` 指向传上去的数据、确认 `dataset_info.json` 注册、`output_dir` 到数据盘。首轮用默认超参，评测不理想再调（rank/lr/epochs）。
+**QLoRA 单卡**（1×32G）。基于 Plan 1 的 `ml/planner/configs/qwen25_7b_lora_sft.yaml`，但有两处关键修正：
+
+- **`cutoff_len: 24576`**（不是 8192）。实测我们的 grounded 上下文中位 ~22.5K token、最大 ~31.5K token，**96% 样本 >8192 token**；8192 会截断掉绝大多数候选，训练输入残缺。24576 与 helloagents 一致（他也用 24576），覆盖中位、只截最长 ~10-20%（可接受）。
+- **QLoRA（4-bit NF4 base）**：`quantization_bit: 4` + `quantization_method: bitsandbytes`(nf4)。4-bit base 省 ~10G 显存，让 24K 上下文在单张 32G 卡装得下（bf16 LoRA 在 24K 需 2 卡序列并行，见下）。代价：4-bit base 轻微降质，SFT 下通常可接受。
+
+其余沿用：LoRA r32 / α64 / dropout 0.05 / target all，micro_batch 1，bf16 计算，gradient/activation checkpointing，flash-attention。**超参起点**：lr 1e-4（QLoRA 常用比 bf16 略高；helloagents bf16 用 1e-5，我们 QLoRA 起 1e-4），2–3 epochs，global_batch ~16-32（grad_accum 调）。**均为首轮起点，看 train/val loss 再调**。
+
+**只改**：dataset 指向传上去的 train/val + `dataset_info.json` 注册、`output_dir` 到数据盘、加 quantization 与 cutoff 字段。
+
+> 为何不是 bf16 单卡：24K 上下文 bf16 LoRA 在单张 32G 上 ~26G 峰值、临界易 OOM；helloagents 靠 2 卡 Ulysses 序列并行才装下。QLoRA 是单卡长上下文的务实解。若首轮结果接近但不够，可升级到 2 卡 bf16（对齐他、质量更高）。
 
 ## 评测数据流（他的解耦结构）
 
@@ -39,7 +48,7 @@ Plan 2b 分两半，分别在不同环境：
 ```
 
 **三方端点**：
-- base 7B、微调 7B → 5090 上 **vLLM** 起 OpenAI 兼容服务。微调侧默认 **LLaMA-Factory export 合并 LoRA 后再 serve**（评测最简单、少一层变量）；如需省去合并步骤可退而用 vLLM `--enable-lora` 直挂 adapter。
+- base 7B、微调 7B → 5090 上 **vLLM** 起 OpenAI 兼容服务。微调侧：QLoRA 训练产出的是 4-bit base + adapter，但 **serve 时用 bf16**——`llamafactory-cli export` 把 LoRA 合并进反量化后的 bf16 base，得到一个完整 bf16 模型给 vLLM serve（评测最简单、少一层变量）。vLLM 不吃训练时的 4-bit 格式，故必须先合并成 bf16。
 - DeepSeek → API（有 key）。
 
 **指标**：`hard_pass`（主，standard/hard 分开）+ 软指标（grounding/多样性/预算贴合率）。可选二次层：LLM-as-judge 成对比较（他有 `eval_pairwise_judge`），非必需，先不做。
