@@ -11,17 +11,23 @@ lora_alpha: 64
 lora_dropout: 0.05
 lora_target: all
 
+### QLoRA（4-bit NF4 base，单张 32G 卡装下 24K 上下文）
+quantization_bit: 4
+quantization_method: bitsandbytes
+quantization_type: nf4
+double_quantization: true
+
 ### dataset
 dataset: trip_planner_sft
 eval_dataset: trip_planner_sft_val
 dataset_dir: ml/planner/llamafactory
 template: qwen
-cutoff_len: 8192
+cutoff_len: 24576
 overwrite_cache: true
 preprocessing_num_workers: 4
 
 ### output
-output_dir: ml/planner/outputs/qwen25_7b_sft_v1
+output_dir: ml/planner/outputs/qwen25_7b_qlora_v1
 logging_steps: 5
 save_steps: 100
 save_total_limit: 4
@@ -30,12 +36,13 @@ plot_loss: true
 ### train
 per_device_train_batch_size: 1
 gradient_accumulation_steps: 16
-learning_rate: 5.0e-5
-num_train_epochs: 3
+learning_rate: 1.0e-4
+num_train_epochs: 2
 lr_scheduler_type: cosine
 warmup_ratio: 0.1
 bf16: true
 gradient_checkpointing: true
+flash_attn: fa2
 
 ### eval
 per_device_eval_batch_size: 1
