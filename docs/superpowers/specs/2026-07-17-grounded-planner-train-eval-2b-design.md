@@ -59,6 +59,7 @@ Plan 2b 分两半，分别在不同环境：
 2. **环境校验**：`torch.zeros(1).cuda()` 通过（确认 PyTorch 2.8/cu128 支持 Blackwell sm_120）；装 LLaMA-Factory + vLLM。
 3. **训练**：`llamafactory-cli train qwen25_7b_lora_sft.yaml` → LoRA adapter。看 loss 曲线、val loss。
 4. **serve + 生成**：vLLM 起 base → 跑 generate.py 得 base 的 generations；起微调 → 得微调的 generations；DeepSeek API → 得 deepseek 的 generations。（各 500 条）
+   - **vLLM 必须 `--max-model-len 32768`**：我们的输入 compact context 中位 ~22.5K token、最大 ~31.5K，加上生成的 plan 输出，需要接近 Qwen2.5-7B 原生 32K 上限。默认 max-model-len 若偏小，长输入会被拒/截断，评测就废了。generate.py 侧 `max_tokens`（输出）设 ~4096 足够一份行程。
 5. **打分 + 报告**：rule_metrics.py 对三份 generations 打分 → 三方对比报告（committed 到 `backend/ml/planner/reports/`）。
 6. **回收**：LoRA adapter + 报告拉回本地；关机止损。
 
@@ -69,7 +70,9 @@ Plan 2b 分两半，分别在不同环境：
 - 多卡（1 卡够）。
 
 ## 风险
-- **Blackwell 兼容**：PyTorch 2.8/cu128 支持 sm_120，但 vLLM / LLaMA-Factory 也要跟上；开机先 `.cuda()` 冒烟，别训到一半才发现。
-- **数据集注册**：LLaMA-Factory 认 `dataset_info.json` 的 sharegpt 字段（我们导出的是 `conversations`/`system`）；训练前先 `--use-reference-output` 之外单跑一个 preprocessing dry-run 确认能加载。
-- **评测可比性**：用他的打分器 + 他的冻结评测集 → 分数可与他公布数字比；但高德 POI 已烤进他的评测记录，我们不重拍，保持冻结。
-- **成本**：GPU ~¥3/时，全流程 4–8 小时；DeepSeek 三方那份是 500 条 API 调用。不用即关机。
+- **⚠️ QLoRA/bitsandbytes 在 Blackwell 上的兼容（可能卡死 QLoRA 方案）**：QLoRA 4-bit 靠 `bitsandbytes`，而 bnb 对 sm_120/CUDA 12.8 的支持是近期才有的。**开机第一件事：装好后先跑一个极小的 4-bit 加载冒烟**（`BitsAndBytesConfig(load_in_4bit=True)` 载入 Qwen2.5-7B 一层/整模型不报错）。若 bnb 不支持 5090 → QLoRA 走不通，退路：① 降 cutoff 到能装下的 bf16 单卡（截断部分候选），② 或加租 1 卡走 bf16+Ulysses（对齐他）。**别等训练启动才发现 bnb 挂了。**
+- **Blackwell 通用兼容**：PyTorch 2.8/cu128 支持 sm_120，但 vLLM / LLaMA-Factory / flash-attn 也要跟上；开机先 `torch.zeros(1).cuda()` + 上面的 bnb 冒烟。
+- **24K 上下文显存**：即便 QLoRA，24576 token 的激活也不小。确认 flash-attention + gradient checkpointing 开启；若 OOM，先降 `cutoff_len`（如 16384，仍远好于 8192）再考虑其他。
+- **数据集注册**：LLaMA-Factory 的 `dataset_info.json` 里 sharegpt 映射要对——我们导出的是 `conversations`(from/value) + 顶层 `system` 字段，需正确配 `formatting: sharegpt` + `columns`(messages/system) + `tags`。训练前跑一次 preprocessing dry-run 确认能加载、且截断比例合理。
+- **评测可比性（勿高估）**：冻结评测集 + 他的打分器让**方法学**一致、可对照；但我们的微调用的是**我们自己的数据 + QLoRA 单卡**（他是 bf16 双卡、数据不同），所以**绝对分数不宜直接等同他公布的数字**。真正内部有效的结论是 base vs 我们微调 vs DeepSeek 这一组三方对比。
+- **成本/时长（保守估）**：24K 长上下文训练慢，~960 样本 ×2–3 epoch 可能 3–5 小时；加装环境+评测，全流程约 **6–12 小时、¥20–40**。DeepSeek 三方那份是 500 条 API 调用。**不用即关机**（含调试卡住时）。
