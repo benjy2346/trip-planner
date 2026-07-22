@@ -2,6 +2,10 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_core.tools import BaseTool
 from app.config import get_settings
 
+from ..logging_config import get_logger
+
+logger = get_logger(__name__)
+
 _client: MultiServerMCPClient | None = None
 _tools: list[BaseTool] = []
 
@@ -10,7 +14,7 @@ async def init_amap_tools() -> None:
     global _client, _tools
     s = get_settings()
     if not s.amap_api_key:
-        print("⚠️  AMAP_API_KEY 未配置，Amap 工具不可用")
+        logger.warning("AMAP_API_KEY 未配置，Amap 工具不可用")
         return
     _client = MultiServerMCPClient({
         "amap": {
@@ -21,7 +25,7 @@ async def init_amap_tools() -> None:
         }
     })
     _tools = await _client.get_tools()
-    print(f"✅ Amap MCP 工具初始化成功，共 {len(_tools)} 个工具")
+    logger.info("Amap MCP 工具初始化成功，共 %d 个工具", len(_tools))
 
 
 async def close_amap_tools() -> None:

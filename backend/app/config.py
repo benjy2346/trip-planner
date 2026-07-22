@@ -94,22 +94,26 @@ def validate_config():
         raise ValueError(error_msg)
 
     if warnings:
-        print("\n⚠️  配置警告:")
         for w in warnings:
-            print(f"  - {w}")
+            _logger().warning("配置警告: %s", w)
 
     return True
 
 
-# 打印配置信息(用于调试)
-def print_config():
-    """打印当前配置(隐藏敏感信息)"""
-    print(f"应用名称: {settings.app_name}")
-    print(f"版本: {settings.app_version}")
-    print(f"服务器: {settings.host}:{settings.port}")
-    print(f"高德地图API Key: {'已配置' if settings.amap_api_key else '未配置'}")
+def _logger():
+    """延迟取 logger：config 会被 logging_config 反向引用，避免循环导入。"""
+    from app.logging_config import get_logger
 
-    print(f"DeepSeek API Key: {'已配置' if settings.deepseek_api_key else '未配置'}")
-    print(f"Redis URL: {settings.redis_url}")
-    print(f"日志级别: {settings.log_level}")
+    return get_logger(__name__)
+
+
+def log_config():
+    """记录当前配置(隐藏敏感信息)"""
+    log = _logger()
+    log.info("应用: %s v%s", settings.app_name, settings.app_version)
+    log.info("服务器: %s:%s", settings.host, settings.port)
+    log.info("高德地图API Key: %s", "已配置" if settings.amap_api_key else "未配置")
+    log.info("DeepSeek API Key: %s", "已配置" if settings.deepseek_api_key else "未配置")
+    log.info("Redis URL: %s", settings.redis_url)
+    log.info("日志级别: %s", settings.log_level)
 

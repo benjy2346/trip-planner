@@ -4,6 +4,10 @@ from fastapi import APIRouter, HTTPException
 
 from ...services.unsplash_service import get_unsplash_service
 
+from ...logging_config import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/poi", tags=["POI"])
 
 
@@ -42,7 +46,7 @@ async def get_attraction_photo(name: str):
         }
 
     except Exception as e:
-        print(f"❌ 获取景点图片失败: {str(e)}")
+        logger.error("获取景点图片失败: %s", e)
         raise HTTPException(
             status_code=500,
             detail=f"获取景点图片失败: {str(e)}"

@@ -12,6 +12,10 @@ from app.models.schemas import TripPlan
 from app.planner.context import PlannerContextBuilder, build_grounded_planner_messages
 from app.planner.validation import validate_grounded_trip_plan, recompute_grounded_budget
 
+from ..logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 _planner_builder = PlannerContextBuilder(amap_api_key=get_settings().amap_api_key)
 
@@ -35,7 +39,7 @@ async def assembler_node(state: SupervisorState) -> dict:
 
     violations = validate_grounded_trip_plan(trip_plan, context)
     if violations:
-        print(f"⚠️ TripPlan 校验告警 {len(violations)} 条: {violations[:5]}")
+        logger.warning("TripPlan 校验告警 %d 条: %s", len(violations), violations[:5])
     trip_plan.budget = recompute_grounded_budget(trip_plan, context["party"]["total"])
 
     return {

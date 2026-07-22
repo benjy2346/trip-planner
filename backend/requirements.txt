@@ -22,7 +22,6 @@ aiohttp>=3.10.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.0
 python-multipart>=0.0.9
-loguru>=0.7.0
 python-dateutil>=2.8.2
 
 # 意图分类模型（微调）

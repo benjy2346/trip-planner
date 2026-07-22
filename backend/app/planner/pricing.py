@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Optional
 from app.models.schemas import TripRequest
 from .output import normalize_poi_name as normalize_planner_poi_name
 
+from ..logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 HOTEL_BASE_COST_BY_TYPE = [
     (["豪华", "奢华", "五星"], 1200),
@@ -390,7 +394,7 @@ def load_attraction_price_table() -> List[Dict[str, Any]]:
     except FileNotFoundError:
         return []
     except Exception as exc:
-        print(f"⚠️  景点票价表读取失败: {path} | {exc}")
+        logger.warning("景点票价表读取失败: %s | %s", path, exc)
         return []
     return list(data.get("items") or [])
 

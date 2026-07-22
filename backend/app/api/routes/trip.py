@@ -6,15 +6,17 @@ from app.models.schemas import TripRequest, TripPlanResponse
 from app.agents import get_supervisor_graph
 from app.agents.state import SupervisorState
 
+from ...logging_config import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/trip", tags=["旅行规划"])
 
 
 @router.post("/plan", response_model=TripPlanResponse, summary="生成旅行计划")
 async def plan_trip(request: TripRequest):
     try:
-        print(f"\n{'='*60}")
-        print(f"📥 收到旅行规划请求: {request.city} {request.travel_days}天 [用户:{request.user_id[:8]}]")
-        print(f"{'='*60}\n")
+        logger.info("收到旅行规划请求: %s %s天 [用户:%s]", request.city, request.travel_days, request.user_id[:8])
 
         graph = get_supervisor_graph()
         config = {"configurable": {"thread_id": request.user_id}}
@@ -38,7 +40,7 @@ async def plan_trip(request: TripRequest):
         )
         result = await graph.ainvoke(initial_state, config=config)
 
-        print("✅ 旅行计划生成成功\n")
+        logger.info("旅行计划生成成功")
         return TripPlanResponse(success=True, message="旅行计划生成成功", data=result["trip_plan"])
 
     except Exception as e:

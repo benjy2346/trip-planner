@@ -13,6 +13,10 @@ import httpx
 
 from .pois import dedupe_pois, filter_pois, normalize_pois, rank_pois
 
+from ..logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 AMAP_BASE_URL = "https://restapi.amap.com/v3"
 AMAP_HTTP_TIMEOUT = int(os.getenv("AMAP_HTTP_TIMEOUT", "30"))
@@ -105,7 +109,7 @@ class AmapPlannerClient:
         )
         if cached is not None:
             if PLANNER_CONTEXT_CACHE_VERBOSE:
-                print(f"  - amap缓存命中: {path} {self._cache_label(query_params)}")
+                logger.debug("amap缓存命中: %s %s", path, self._cache_label(query_params))
             return cached
 
         request_params = {**query_params, "key": self.api_key}
@@ -182,7 +186,7 @@ class AmapPlannerClient:
             ttl_seconds=PLANNER_CONTEXT_CLASSIC_CACHE_TTL_SECONDS,
         )
         if cached is not None:
-            # print(f"  - classic_pois缓存命中: {city} ({len(cached)}条)")
+            logger.debug("classic_pois缓存命中: %s (%d条)", city, len(cached))
             return cached
 
         rows = self.search_keywords(
@@ -295,4 +299,4 @@ class AmapPlannerClient:
             tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             tmp_path.replace(path)
         except Exception as exc:
-            print(f"⚠️  {label}缓存写入失败: {exc}")
+            logger.warning("%s缓存写入失败: %s", label, exc)

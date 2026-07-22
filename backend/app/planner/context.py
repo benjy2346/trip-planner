@@ -35,6 +35,10 @@ from .pricing import with_hotel_cost_hints, with_meal_cost_hints, with_ticket_pr
 from .prompts import PLANNER_AGENT_PROMPT
 from .weather import align_trip_weather, normalize_weather
 
+from ..logging_config import get_logger
+
+logger = get_logger(__name__)
+
 PRICING_POLICY = {
     "hotel_price_unit": "单间每晚(元)",
     "ticket_price_unit": "成人单人票(元)",
@@ -197,7 +201,7 @@ class PlannerContextBuilder:
                     )
                 except Exception as exc:
                     context["tool_snapshot"]["tool_status"][name] = self._tool_status(False, str(exc))
-                    print(f"⚠️  {name}工具快照获取失败: {exc}")
+                    logger.warning("%s工具快照获取失败: %s", name, exc)
 
         # 当前主线不生成粗糙路线 hint：直接把酒店/景点/餐饮候选的
         # address、district 和 location 交给 Planner 判断动线。
