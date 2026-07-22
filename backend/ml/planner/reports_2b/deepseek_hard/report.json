@@ -1,0 +1,16 @@
+{
+  "model": "deepseek_hard",
+  "summary": {
+    "count": 300,
+    "json_ok": 100.0,
+    "schema_ok": 97.0,
+    "hard_pass": 86.7,
+    "soft_pass": 74.0,
+    "budget_ok": 92.0,
+    "attraction_grounding_avg": 96.9,
+    "meal_grounding_avg": 96.3,
+    "hotel_grounding_avg": 97.0,
+    "meal_diversity_unique_avg": 92.3,
+    "meal_repeat_avg": 0.09
+  }
+}
