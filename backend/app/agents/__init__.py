@@ -1,27 +1,23 @@
-from app.agents.supervisor import create_supervisor_graph
-from app.agents.chat_graph import create_chat_graph
+from app.agents.graph import MODE_CHAT, MODE_GENERATE, create_trip_graph
 
-_supervisor_graph = None
-_chat_graph = None
+_trip_graph = None
 
 
-def init_supervisor_graph(checkpointer) -> None:
-    global _supervisor_graph
-    _supervisor_graph = create_supervisor_graph(checkpointer)
+def init_trip_graph(checkpointer) -> None:
+    global _trip_graph
+    _trip_graph = create_trip_graph(checkpointer)
 
 
-def get_supervisor_graph():
-    if _supervisor_graph is None:
-        raise RuntimeError("supervisor_graph not initialized")
-    return _supervisor_graph
+def get_trip_graph():
+    if _trip_graph is None:
+        raise RuntimeError("trip_graph not initialized")
+    return _trip_graph
 
 
-def init_chat_graph(checkpointer) -> None:
-    global _chat_graph
-    _chat_graph = create_chat_graph(checkpointer)
-
-
-def get_chat_graph():
-    if _chat_graph is None:
-        raise RuntimeError("chat_graph not initialized")
-    return _chat_graph
+__all__ = [
+    "MODE_CHAT",
+    "MODE_GENERATE",
+    "create_trip_graph",
+    "get_trip_graph",
+    "init_trip_graph",
+]

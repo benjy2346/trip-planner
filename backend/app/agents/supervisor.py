@@ -48,9 +48,3 @@ async def assembler_node(state: SupervisorState) -> dict:
     }
 
 
-def create_supervisor_graph(checkpointer=None):
-    builder = StateGraph(SupervisorState)
-    builder.add_node("assembler", assembler_node)
-    builder.add_edge(START, "assembler")
-    builder.add_edge("assembler", END)
-    return builder.compile(checkpointer=checkpointer)

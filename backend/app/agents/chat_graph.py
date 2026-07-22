@@ -166,14 +166,3 @@ async def classify_intent_node(state: SupervisorState) -> Command:
     return Command(goto=INTENT_TO_NODE[intent], update={"intent": intent})
 
 
-def create_chat_graph(checkpointer=None):
-    builder = StateGraph(SupervisorState)
-    builder.add_node("classify_intent", classify_intent_node)
-    builder.add_node("query_handler", query_handler_node)
-    builder.add_node("modify_handler", modify_handler_node)
-    builder.add_node("other_handler", other_handler_node)
-    builder.add_edge(START, "classify_intent")
-    builder.add_edge("query_handler", END)
-    builder.add_edge("modify_handler", END)
-    builder.add_edge("other_handler", END)
-    return builder.compile(checkpointer=checkpointer)

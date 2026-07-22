@@ -26,6 +26,7 @@ def _make_initial_state(request):
         weather_outputs=[],
         hotel_outputs=[],
         poi_outputs=[],
+        mode="generate",
     )
 
 
@@ -54,8 +55,8 @@ async def test_supervisor_returns_trip_plan():
          patch("app.agents.supervisor._planner_builder.compact_for_planner", side_effect=lambda c: c), \
          patch("app.agents.supervisor.acall_agent_with_fallback", AsyncMock(return_value=mock_response)):
 
-        from app.agents.supervisor import create_supervisor_graph
-        result = await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
+        from app.agents.graph import create_trip_graph
+        result = await create_trip_graph().ainvoke(_make_initial_state(_make_request()))
 
     assert result["trip_plan"] is not None
     assert result["trip_plan"].city == "北京"
@@ -73,8 +74,8 @@ async def test_supervisor_uses_builder_and_validates():
          patch("app.agents.supervisor.validate_grounded_trip_plan", return_value=["第1天 缺少 lunch"]) as mock_validate, \
          patch("app.agents.supervisor.acall_agent_with_fallback", AsyncMock(return_value=mock_response)):
 
-        from app.agents.supervisor import create_supervisor_graph
-        result = await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
+        from app.agents.graph import create_trip_graph
+        result = await create_trip_graph().ainvoke(_make_initial_state(_make_request()))
 
     mock_collect.assert_called_once()
     mock_validate.assert_called_once()

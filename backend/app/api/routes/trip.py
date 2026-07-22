@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import RemoveMessage
 from app.models.schemas import TripRequest, TripPlanResponse
-from app.agents import get_supervisor_graph
+from app.agents import MODE_GENERATE, get_trip_graph
 from app.agents.state import SupervisorState
 
 from ...logging_config import get_logger
@@ -18,7 +18,7 @@ async def plan_trip(request: TripRequest):
     try:
         logger.info("收到旅行规划请求: %s %s天 [用户:%s]", request.city, request.travel_days, request.user_id[:8])
 
-        graph = get_supervisor_graph()
+        graph = get_trip_graph()
         config = {"configurable": {"thread_id": request.user_id}}
 
         # 重新规划时清空历史 messages，避免跨 session 累积
@@ -37,6 +37,7 @@ async def plan_trip(request: TripRequest):
             weather_outputs=[],
             hotel_outputs=[],
             poi_outputs=[],
+            mode=MODE_GENERATE,
         )
         result = await graph.ainvoke(initial_state, config=config)
 

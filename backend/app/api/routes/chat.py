@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
-from app.agents import get_supervisor_graph, get_chat_graph
+from app.agents import MODE_CHAT, get_trip_graph
 from app.models.schemas import TripPlan
 
 router = APIRouter(prefix="/chat", tags=["多轮对话"])
@@ -21,7 +21,7 @@ class ChatModifyResponse(BaseModel):
 
 @router.get("/history/{user_id}", summary="获取对话历史")
 async def get_history(user_id: str):
-    graph = get_supervisor_graph()
+    graph = get_trip_graph()
     config = {"configurable": {"thread_id": user_id}}
     snapshot = await graph.aget_state(config)
     if not snapshot or not snapshot.values:
@@ -36,13 +36,14 @@ async def get_history(user_id: str):
 @router.post("/modify", response_model=ChatModifyResponse, summary="多轮修改行程")
 async def modify_trip(request: ChatModifyRequest):
     config = {"configurable": {"thread_id": request.user_id}}
+    graph = get_trip_graph()
 
-    snapshot = await get_supervisor_graph().aget_state(config)
+    snapshot = await graph.aget_state(config)
     if not snapshot or not snapshot.values:
         raise HTTPException(status_code=404, detail="会话不存在，请先生成行程")
 
-    result = await get_chat_graph().ainvoke(
-        {"messages": [HumanMessage(content=request.message)]},
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content=request.message)], "mode": MODE_CHAT},
         config=config,
     )
 

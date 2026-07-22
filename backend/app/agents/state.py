@@ -13,6 +13,9 @@ class SupervisorState(TypedDict):
     hotel_outputs: Annotated[list, operator.add]
     poi_outputs: Annotated[list, operator.add]
     intent: NotRequired[str]
+    # 本次调用走生成还是对话分支。由调用方显式指定，不靠"有没有 trip_plan"去猜——
+    # 已有行程时用户仍可能要求重新生成。
+    mode: NotRequired[str]
 
 
 class WeatherSubState(TypedDict):
