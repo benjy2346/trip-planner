@@ -1,0 +1,13 @@
+### 把 QLoRA 训练出的 LoRA adapter 合并进反量化后的 bf16 base，
+### 得到完整 bf16 模型给 vLLM serve（vLLM 不吃训练时的 4-bit 格式）。
+model_name_or_path: Qwen/Qwen2.5-7B-Instruct
+adapter_name_or_path: ml/planner/outputs/qwen25_7b_qlora_v1
+template: qwen
+finetuning_type: lora
+trust_remote_code: true
+
+### export
+export_dir: ml/planner/outputs/qwen25_7b_qlora_v1_merged
+export_size: 5
+export_device: cpu
+export_legacy_format: false

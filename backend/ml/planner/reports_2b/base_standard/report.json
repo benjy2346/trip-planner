@@ -1,0 +1,16 @@
+{
+  "model": "base_standard",
+  "summary": {
+    "count": 200,
+    "json_ok": 99.0,
+    "schema_ok": 96.0,
+    "hard_pass": 35.0,
+    "soft_pass": 24.0,
+    "budget_ok": 90.5,
+    "attraction_grounding_avg": 96.0,
+    "meal_grounding_avg": 95.1,
+    "hotel_grounding_avg": 95.5,
+    "meal_diversity_unique_avg": 62.6,
+    "meal_repeat_avg": 1.75
+  }
+}

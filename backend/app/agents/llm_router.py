@@ -81,3 +81,11 @@ def call_with_fallback(messages: list[BaseMessage]):
 
 async def acall_with_fallback(messages: list[BaseMessage]):
     return await get_llm_chain().ainvoke(messages)
+
+
+async def acall_agent_with_fallback(agent_name: str, messages: list[BaseMessage]):
+    """优先使用 agents_config.yaml 中该 agent 指定的模型，异常时降级到全局链。"""
+    try:
+        return await get_agent_llm(agent_name).ainvoke(messages)
+    except Exception:
+        return await acall_with_fallback(messages)

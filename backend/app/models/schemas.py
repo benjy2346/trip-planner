@@ -2,11 +2,38 @@
 
 from typing import List, Optional, Union
 from uuid import uuid4
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, computed_field
 from datetime import date
 
 
 # ============ 请求模型 ============
+
+class PartyInfo(BaseModel):
+    """同行人信息"""
+    adults: int = Field(default=1, ge=1, description="成人数")
+    children: int = Field(default=0, ge=0, description="儿童数")
+    elders: int = Field(default=0, ge=0, description="老人数")
+    companion_type: str = Field(default="other", description="同行类型", example="couple")
+
+    @computed_field
+    @property
+    def total(self) -> int:
+        return self.adults + self.children + self.elders
+
+
+class BudgetConstraint(BaseModel):
+    """预算约束"""
+    amount: Optional[int] = Field(default=None, ge=0, description="预算金额(元)，None 表示未指定")
+    scope: str = Field(default="total", description="预算口径：整趟总额")
+    currency: str = Field(default="CNY", description="币种")
+    budget_level: str = Field(
+        default="comfortable",
+        description="预算档位，如 limited/standard/comfortable/premium/luxury（不再枚举限制，"
+                     "以匹配 app/planner 分级定价与偏好关键词表的实际取值范围）")
+    strictness: str = Field(
+        default="soft",
+        description="预算严格程度：hard 不能超，soft 尽量贴合，none 表示不设预算贴合目标")
+
 
 class TripRequest(BaseModel):
     """旅行规划请求"""
@@ -19,7 +46,9 @@ class TripRequest(BaseModel):
     accommodation: str = Field(..., description="住宿偏好", example="经济型酒店")
     preferences: List[str] = Field(default=[], description="旅行偏好标签", example=["历史文化", "美食"])
     free_text_input: Optional[str] = Field(default="", description="额外要求", example="希望多安排一些博物馆")
-    
+    party: PartyInfo = Field(default_factory=PartyInfo, description="同行人信息")
+    budget_constraint: Optional[BudgetConstraint] = Field(default=None, description="预算约束")
+
     class Config:
         json_schema_extra = {
             "example": {

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.models.schemas import TripRequest, TripPlan, WeatherInfo, Hotel, Attraction, Location
+from app.models.schemas import TripRequest
 
 
 def _make_request():
@@ -29,25 +29,30 @@ def _make_initial_state(request):
     )
 
 
+def _fake_context():
+    """Builder.collect() 产物的最小 grounded 形状（helloagents 键名）。"""
+    return {
+        "request": {"city": "北京", "start_date": "2025-06-01", "end_date": "2025-06-03"},
+        "party": {"total": 2},
+        "preference_profile": {"diet_avoid": []},
+        "planner_constraints": {"expected_dates": ["2025-06-01", "2025-06-02", "2025-06-03"]},
+        "tool_snapshot": {
+            "trip_weather": [],
+            "classic_pois": [], "preference_pois": [], "scenic_pois": [], "experience_pois": [],
+            "hotel_pois": [], "food_pois": [],
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_supervisor_returns_trip_plan():
-    weather_out = [WeatherInfo(date="2025-06-01", day_weather="晴", night_weather="多云", day_temp=28, night_temp=18)]
-    hotel_out = [Hotel(name="如家", address="北京朝阳", price_range="200-300", rating="4.2", type="经济型")]
-    poi_out = [Attraction(name="故宫", address="东城区", location=Location(longitude=116.4, latitude=39.9), visit_duration=180, description="历史")]
-
     plan_json = '{"city":"北京","start_date":"2025-06-01","end_date":"2025-06-03","days":[],"overall_suggestions":"推荐早起"}'
-
     mock_response = MagicMock()
     mock_response.content = plan_json
 
-    with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
-         patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
-         patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.acall_with_fallback", AsyncMock(return_value=mock_response)):
-
-        mock_w.ainvoke = AsyncMock(return_value={"weather_result": weather_out})
-        mock_h.ainvoke = AsyncMock(return_value={"hotel_result": hotel_out})
-        mock_p.ainvoke = AsyncMock(return_value={"poi_result": poi_out})
+    with patch("app.agents.supervisor._planner_builder.collect", return_value=_fake_context()), \
+         patch("app.agents.supervisor._planner_builder.compact_for_planner", side_effect=lambda c: c), \
+         patch("app.agents.supervisor.acall_agent_with_fallback", AsyncMock(return_value=mock_response)):
 
         from app.agents.supervisor import create_supervisor_graph
         result = await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
@@ -57,24 +62,22 @@ async def test_supervisor_returns_trip_plan():
 
 
 @pytest.mark.asyncio
-async def test_all_three_subgraphs_invoked():
+async def test_supervisor_uses_builder_and_validates():
+    """取数走 Builder（不再是三个子图），校验走 grounded 校验、只告警不拦截。"""
     plan_json = '{"city":"北京","start_date":"2025-06-01","end_date":"2025-06-03","days":[],"overall_suggestions":"ok"}'
-
     mock_response = MagicMock()
     mock_response.content = plan_json
 
-    with patch("app.agents.supervisor.weather_subgraph") as mock_w, \
-         patch("app.agents.supervisor.hotel_subgraph") as mock_h, \
-         patch("app.agents.supervisor.poi_subgraph") as mock_p, \
-         patch("app.agents.supervisor.acall_with_fallback", AsyncMock(return_value=mock_response)):
-
-        mock_w.ainvoke = AsyncMock(return_value={"weather_result": []})
-        mock_h.ainvoke = AsyncMock(return_value={"hotel_result": []})
-        mock_p.ainvoke = AsyncMock(return_value={"poi_result": []})
+    with patch("app.agents.supervisor._planner_builder.collect", return_value=_fake_context()) as mock_collect, \
+         patch("app.agents.supervisor._planner_builder.compact_for_planner", side_effect=lambda c: c), \
+         patch("app.agents.supervisor.validate_grounded_trip_plan", return_value=["第1天 缺少 lunch"]) as mock_validate, \
+         patch("app.agents.supervisor.acall_agent_with_fallback", AsyncMock(return_value=mock_response)):
 
         from app.agents.supervisor import create_supervisor_graph
-        await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
+        result = await create_supervisor_graph().ainvoke(_make_initial_state(_make_request()))
 
-    mock_w.ainvoke.assert_called_once()
-    mock_h.ainvoke.assert_called_once()
-    mock_p.ainvoke.assert_called_once()
+    mock_collect.assert_called_once()
+    mock_validate.assert_called_once()
+    # 校验有违规也不拦截，仍返回行程
+    assert result["trip_plan"] is not None
+    assert result["trip_plan"].city == "北京"

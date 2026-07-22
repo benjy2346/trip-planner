@@ -49,6 +49,15 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Planner 高德/经典POI本地缓存
+.cache/
+
 # 微调模型产物与合成数据
 models/
 ml/intent/data/
+
+# Planner 微调产物（评测集与 configs 入 git，数据/训练产物不入）
+ml/planner/data/
+ml/planner/outputs/
+ml/planner/llamafactory/generated/
+ml/planner/runs_eval/
