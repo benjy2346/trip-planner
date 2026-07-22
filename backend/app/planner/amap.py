@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import random
 import threading
 import time
 from pathlib import Path
@@ -35,6 +36,37 @@ PLANNER_CONTEXT_CLASSIC_CACHE_TTL_SECONDS = int(
 PLANNER_CONTEXT_CACHE_VERBOSE = os.getenv("PLANNER_CONTEXT_CACHE_VERBOSE", "0") == "1"
 AMAP_QPS_LIMIT = float(os.getenv("AMAP_QPS_LIMIT", "3"))
 AMAP_MIN_INTERVAL_SECONDS = 1.0 / AMAP_QPS_LIMIT if AMAP_QPS_LIMIT > 0 else 0.0
+
+AMAP_RETRY_ATTEMPTS = int(os.getenv("AMAP_RETRY_ATTEMPTS", "3"))
+AMAP_RETRY_BASE_DELAY = float(os.getenv("AMAP_RETRY_BASE_DELAY", "0.5"))
+AMAP_RETRY_MAX_DELAY = float(os.getenv("AMAP_RETRY_MAX_DELAY", "8"))
+
+# 可重试的高德业务错误码：瞬时故障，退避后有机会成功。
+# 未列出的业务错误（10001 KEY 无效、20000 参数错误、10003 配额耗尽等）重试也不会
+# 成功，立即失败，避免白白消耗配额并让用户多等几秒。
+RETRYABLE_AMAP_INFOCODES = {
+    "10004",  # ACCESS_TOO_FREQUENT：QPS 超限
+    "30000",  # 引擎服务响应错误
+}
+
+
+class AmapTransientError(RuntimeError):
+    """可重试的高德错误（限频、引擎瞬时故障、5xx）。"""
+
+
+class AmapPermanentError(RuntimeError):
+    """不可重试的高德错误（KEY 无效、参数错误、配额耗尽）。"""
+
+
+def _retry_delay(attempt: int) -> float:
+    """指数退避 + equal jitter。
+
+    退避本身防止持续打压下游；jitter 把并发失败的请求错开，避免它们在同一时刻
+    一起重试（惊群）。取值范围 [capped/2, capped)。
+    """
+    capped = min(AMAP_RETRY_BASE_DELAY * (2 ** attempt), AMAP_RETRY_MAX_DELAY)
+    half = capped / 2
+    return half + random.uniform(0, half)
 
 _AMAP_RATE_LIMIT_LOCK = threading.Lock()
 _AMAP_LAST_REQUEST_AT = 0.0
@@ -78,14 +110,20 @@ class AmapPlannerClient:
 
         request_params = {**query_params, "key": self.api_key}
         last_exc: Optional[Exception] = None
-        for attempt in range(3):
+        for attempt in range(AMAP_RETRY_ATTEMPTS):
             try:
                 self._wait_for_amap_slot()
                 response = httpx.get(f"{AMAP_BASE_URL}{path}", params=request_params, timeout=AMAP_HTTP_TIMEOUT)
-                response.raise_for_status()
+                if response.status_code == 429 or response.status_code >= 500:
+                    raise AmapTransientError(f"高德HTTP {response.status_code}")
+                response.raise_for_status()  # 其余 4xx：请求本身有问题，不重试
                 data = response.json()
                 if data.get("status") == "0":
-                    raise RuntimeError(f"高德API错误: {data.get('info')} ({data.get('infocode')})")
+                    infocode = str(data.get("infocode", ""))
+                    message = f"高德API错误: {data.get('info')} ({infocode})"
+                    if infocode in RETRYABLE_AMAP_INFOCODES:
+                        raise AmapTransientError(message)
+                    raise AmapPermanentError(message)
                 self._write_cache(
                     cache_path,
                     data,
@@ -94,10 +132,15 @@ class AmapPlannerClient:
                     label="amap",
                 )
                 return data
-            except Exception as exc:
+            except (AmapTransientError, httpx.TransportError) as exc:
+                # TransportError 覆盖超时与各类网络错误；其余异常（含 AmapPermanentError、
+                # 4xx HTTPStatusError）直接向上抛，不浪费重试次数。
                 last_exc = exc
-                time.sleep(0.5 + attempt)
-        raise RuntimeError(f"高德API请求失败: {last_exc}") from last_exc
+                if attempt < AMAP_RETRY_ATTEMPTS - 1:
+                    time.sleep(_retry_delay(attempt))
+        raise RuntimeError(
+            f"高德API请求失败（已重试{AMAP_RETRY_ATTEMPTS}次）: {last_exc}"
+        ) from last_exc
 
     def search_keywords(
         self,
